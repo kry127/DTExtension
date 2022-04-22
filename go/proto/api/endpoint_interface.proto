@@ -1,0 +1,13 @@
+syntax="proto3";
+
+package kry127.yandexcloud.datatransfer.v1;
+
+import "table_guarantees.proto";
+
+message ConfigureEndpointRequest {
+
+}
+
+message ConfigureEndpointResponse {
+
+}
