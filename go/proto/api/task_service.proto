@@ -13,6 +13,7 @@ service TaskService {
     rpc GetChildTasks(TaskId) returns (TaskIds);
 
     rpc SplitTask(TaskId) returns (SplitTaskResponse);
+    rpc GetChangeItems(stream GetChangeItemsRequest) returns (stream GetChangeItemsResponse);
 }
 
 message TaskId {
@@ -32,5 +33,14 @@ message SplitTaskResponse {
     message Ok {
         repeated uint32 task_ids = 1;
     }
+}
+
+message GetChangeItemsRequest {
+    uint64 stream_lsn = 1;
+}
+
+message GetChangeItemsResponse {
+    uint64 stream_lsn = 1;
+    ChangeItem change_item = 2;
 }
 

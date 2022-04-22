@@ -18,3 +18,7 @@ enum TransferType {
     TRANSFER_TYPE_INCREMENT_ONLY = 2;
     TRANSFER_TYPE_SNAPSHOT_AND_INCREMENT = 3;
 }
+
+message ChangeItem {
+    bytes change_item_serialized = 1;
+}
