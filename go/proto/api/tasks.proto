@@ -1,0 +1,36 @@
+syntax="proto3";
+
+import "google/protobuf/wrappers.proto";
+
+message Task {
+    oneof task {
+        ShardTask shard_task = 1;
+        SplittableShardTask splittable_shard_task = 2;
+        StreamTask stream_task = 3;
+    }
+}
+
+message ShardTask {
+    uint32 task_id = 1;
+    Progress progress = 2;
+}
+
+message SplittableShardTask {
+    uint32 task_id = 1;
+    Progress progress = 2;
+    .google.protobuf.UInt32Value parent_task_id = 4;
+    repeated uint32 child_tasks = 5;
+}
+
+message StreamTask {
+    uint32 task_id = 1;
+}
+
+
+message Progress {
+    uint64 uploaded_count = 1;
+    oneof eta_method {
+        uint64 max_count = 2;
+        float user_eta = 3;
+    }
+}
