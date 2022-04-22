@@ -96,3 +96,7 @@ message ChangeDataCapture {
     repeated Table tables = 2;
   }
 }
+
+message DeltaCapture {
+
+}
