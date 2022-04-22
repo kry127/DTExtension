@@ -55,12 +55,12 @@ message HealthcheckResponse {
 
 message ConfigureEndpointResponse {
     oneof response {
-        ConfigureEndpointOkResponse ok = 1;
+        Ok ok = 1;
         ErrorResponse error = 2;
     }
-}
 
-message ConfigureEndpointOkResponse {
-    repeated Task tasks = 1;
-    repeated PersistedTask persisted_tasks = 2;
+    message Ok {
+        repeated Task tasks = 1;
+        repeated PersistedTask persisted_tasks = 2;
+    }
 }

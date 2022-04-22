@@ -2,6 +2,7 @@ syntax="proto3";
 
 package kry127.yandexcloud.datatransfer.v1;
 
+import "common.proto";
 import "tasks.proto";
 
 service TaskService {
@@ -11,6 +12,7 @@ service TaskService {
     rpc GetParentTasks(TaskId) returns (TaskIds);
     rpc GetChildTasks(TaskId) returns (TaskIds);
 
+    rpc SplitTask(TaskId) returns (SplitTaskResponse);
 }
 
 message TaskId {
@@ -21,4 +23,14 @@ message TaskIds {
     repeated uint32 task_ids = 1;
 }
 
+message SplitTaskResponse {
+    oneof response {
+        Ok ok = 1;
+        ErrorResponse error = 2;
+    }
+
+    message Ok {
+        repeated uint32 task_ids = 1;
+    }
+}
 
