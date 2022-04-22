@@ -2,33 +2,39 @@ syntax="proto3";
 
 package kry127.yandexcloud.datatransfer.v1;
 
-message Table {
-  string namespace = 1;
-  string name = 2;
-}
+import "common.proto";
 
 message TableGuarantee {
-  oneof table_guarantee {
-    NoGuarantee no_guarantee = 1;
-    MonoColumnDescription monotonic_column = 2;
-    AdditionOnlyTable addition_only_table = 3;
-    MonoColumnDescription monotonic_column_in_addition_only_table = 4;
-    AppendOnlyTable append_only_table = 5;
-  }
+  Table table = 1;
+  Guarantee guarantee = 2;
 
-  message NoGuarantee {
+  message Guarantee {
+    oneof guarantee {
+      NoGuarantee no_guarantee = 1;
+      MonoColumnDescription monotonic_column = 2;
+      AdditionOnlyTable addition_only_table = 3;
+      MonoColumnInAdditionOnlyTableDescription monotonic_column_in_addition_only_table = 4;
+      AppendOnlyTable append_only_table = 5;
+    }
 
-  }
+    message NoGuarantee {
 
-  message MonoColumnDescription {
-    string column_name = 1;
-  }
+    }
 
-  message AdditionOnlyTable {
+    message MonoColumnDescription {
+      string column_name = 1;
+    }
 
-  }
+    message AdditionOnlyTable {
 
-  message AppendOnlyTable {
+    }
 
+    message MonoColumnInAdditionOnlyTableDescription {
+      string column_name = 1;
+    }
+
+    message AppendOnlyTable {
+
+    }
   }
 }

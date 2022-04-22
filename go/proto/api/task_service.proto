@@ -1,0 +1,24 @@
+syntax="proto3";
+
+package kry127.yandexcloud.datatransfer.v1;
+
+import "tasks.proto";
+
+service TaskService {
+    rpc GetTask(TaskId) returns (Task);
+    rpc PersistTask(TaskId) returns (PersistedTask);
+
+    rpc GetParentTasks(TaskId) returns (TaskIds);
+    rpc GetChildTasks(TaskId) returns (TaskIds);
+
+}
+
+message TaskId {
+    uint32 task_id = 1;
+}
+
+message TaskIds {
+    repeated uint32 task_ids = 1;
+}
+
+

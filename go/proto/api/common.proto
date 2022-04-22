@@ -1,0 +1,20 @@
+syntax="proto3";
+
+package kry127.yandexcloud.datatransfer.v1;
+
+message ErrorResponse {
+    string error = 1;
+    string verbose = 2;
+}
+
+message Table {
+    string database = 1;
+    string name = 2;
+}
+
+enum TransferType {
+    TRANSFER_TYPE_UNSPECIFIED = 0;
+    TRANSFER_TYPE_SNAPSHOT_ONLY = 1;
+    TRANSFER_TYPE_INCREMENT_ONLY = 2;
+    TRANSFER_TYPE_SNAPSHOT_AND_INCREMENT = 3;
+}

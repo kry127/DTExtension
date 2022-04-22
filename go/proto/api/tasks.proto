@@ -1,28 +1,67 @@
 syntax="proto3";
 
+package kry127.yandexcloud.datatransfer.v1;
+
+import "common.proto";
 import "google/protobuf/wrappers.proto";
 
 message Task {
     oneof task {
-        ShardTask shard_task = 1;
-        SplittableShardTask splittable_shard_task = 2;
-        StreamTask stream_task = 3;
+        SnapshotTask snapshot_task = 1;
+        StreamTask stream_task = 2;
     }
 }
 
-message ShardTask {
-    uint32 task_id = 1;
-    Progress progress = 2;
+message SnapshotTask {
+    oneof stream_task {
+        TableSnapshotTask table_snapshot_task = 1;
+        SplittableTableSnapshotTask splittable_table_snapshot_task = 2;
+    }
 }
 
-message SplittableShardTask {
+message StreamTask {
+    oneof stream_task {
+        WholeStreamTask whole_stream_task = 1;
+        DatabaseStreamTask database_stream_task = 2;
+        TableStreamTask table_stream_task = 3;
+        LogStreamTask log_stream_task = 4;
+    }
+}
+
+message PersistedTask {
     uint32 task_id = 1;
-    Progress progress = 2;
+    bytes user_persisted_task = 2;
+}
+
+message TableSnapshotTask {
+    uint32 task_id = 1;
+    string table_name = 2;
+    Progress progress = 3;
+}
+
+message SplittableTableSnapshotTask {
+    uint32 task_id = 1;
+    string table_name = 2;
+    Progress progress = 3;
     .google.protobuf.UInt32Value parent_task_id = 4;
     repeated uint32 child_tasks = 5;
 }
 
-message StreamTask {
+message WholeStreamTask {
+    uint32 task_id = 1;
+}
+
+message DatabaseStreamTask {
+    uint32 task_id = 1;
+    string database = 2;
+}
+
+message TableStreamTask {
+    uint32 task_id = 1;
+    Table table = 2;
+}
+
+message LogStreamTask {
     uint32 task_id = 1;
 }
 
