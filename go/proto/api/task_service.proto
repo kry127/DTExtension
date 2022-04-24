@@ -36,11 +36,11 @@ message SplitTaskResponse {
 }
 
 message GetChangeItemsRequest {
-    uint64 stream_lsn = 1;
+    uint64 begin_from_lsn = 1;
 }
 
 message GetChangeItemsResponse {
     uint64 stream_lsn = 1;
-    ChangeItem change_item = 2;
+    repeated ChangeItem change_item = 2;
 }
 
