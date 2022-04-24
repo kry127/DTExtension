@@ -14,7 +14,6 @@ message TableGuarantee {
       MonoColumnDescription monotonic_column = 2;
       AdditionOnlyTable addition_only_table = 3;
       MonoColumnInAdditionOnlyTableDescription monotonic_column_in_addition_only_table = 4;
-      AppendOnlyTable append_only_table = 5;
     }
 
     message NoGuarantee {
@@ -31,10 +30,6 @@ message TableGuarantee {
 
     message MonoColumnInAdditionOnlyTableDescription {
       string column_name = 1;
-    }
-
-    message AppendOnlyTable {
-
     }
   }
 }
