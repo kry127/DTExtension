@@ -31,6 +31,19 @@ message StreamTask {
 message PersistedTask {
     uint32 task_id = 1;
     bytes user_persisted_task = 2;
+    Checkpoint checkpoint = 3;
+
+    // Developer of connector required to provide database-specific deduplicator 'user_defined_lsn'
+    // and should be available to marshal and unmarshal it to 'user_defined_lsn'.
+    // Everytime we save task state "persisted task" we store mapping of our 'synthetic_lsn' to 'user_defined_lsn'
+    // so we can perform deduplication without even knowing about database type at all!
+    // this allows **failover deduplication** -- after task restore we know, how many messages we should skip.
+    // For instance: we've ended up with LSN: 215 and task crashed, restored it at LSN: 209, and we know, that
+    // six more change items from user should be skipped.
+    message Checkpoint {
+        uint64 synthetic_lsn = 1;
+        bytes user_defined_lsn = 2;
+    }
 }
 
 message TableSnapshotTask {
