@@ -1,9 +1,9 @@
 syntax="proto3";
 
-package kry127.yandexcloud.datatransfer.v1;
+package yandexcloud.datatransfer.dtextension.source.v1;
 
 import "common.proto";
-import "table_guarantees.proto";
+import "table_guarantee.proto";
 import "tasks.proto";
 
 service SourceInterface {
