@@ -5,10 +5,25 @@ package kry127.yandexcloud.datatransfer.v1;
 import "common.proto";
 import "google/protobuf/wrappers.proto";
 
+// This guarantee should be provided by third-party endpoint code:
+enum TaskFailoverType {
+    // unknown failover type, assume Full Restart as default
+    TASK_FAILOVER_TYPE_UNSPECIFIED = 0;
+    // the only way to produce At Least Once after failover: Full Restart. No guarantees from user endpoint code
+    TASK_FAILOVER_TYPE_FULL_RESTART = 1;
+    // endpoint code should provide commit entity from which restart process (e.g. monotonic column)
+    // restoration after failover and reading from commit point may produce other sequence of messages than before
+    TASK_FAILOVER_TYPE_COMMITABLE = 2;
+    // endpoint code should provide commit entity from which restart process
+    // restoration after failover and reading from commit point is guarantee to reproduce the same sequence of events
+    TASK_FAILOVER_TYPE_REPLAYABLE = 3;
+}
+
 message Task {
+    TaskFailoverType failover_type = 1;
     oneof task {
-        SnapshotTask snapshot_task = 1;
-        StreamTask stream_task = 2;
+        SnapshotTask snapshot_task = 2;
+        StreamTask stream_task = 3;
     }
 }
 
@@ -29,9 +44,11 @@ message StreamTask {
 }
 
 message PersistedTask {
-    uint32 task_id = 1;
-    bytes user_persisted_task = 2;
-    Checkpoint checkpoint = 3;
+    TaskFailoverType failover_type = 1;
+    uint32 task_id = 2;
+    bytes user_persisted_task = 3;
+    // this can be null if failover type is Full Restart
+    Checkpoint checkpoint = 4;
 
     // Developer of connector required to provide database-specific deduplicator 'user_defined_lsn'
     // and should be available to marshal and unmarshal it to 'user_defined_lsn'.
