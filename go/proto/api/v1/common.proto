@@ -1,6 +1,6 @@
 syntax="proto3";
 
-package yandexcloud.datatransfer.dtextension.source.v1;
+package yandexcloud.datatransfer.dtextension.v1;
 
 message ErrorResponse {
     string error = 1;

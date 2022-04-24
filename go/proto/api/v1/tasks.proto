@@ -1,8 +1,8 @@
 syntax="proto3";
 
-package yandexcloud.datatransfer.dtextension.source.v1;
+package yandexcloud.datatransfer.dtextension.v1;
 
-import "common.proto";
+import "v1/common.proto";
 import "google/protobuf/wrappers.proto";
 
 // This guarantee should be provided by third-party endpoint code:
@@ -24,6 +24,7 @@ message Task {
     oneof task {
         SnapshotTask snapshot_task = 2;
         StreamTask stream_task = 3;
+        SinkTask sink_task = 4;
     }
 }
 
@@ -92,6 +93,10 @@ message TableStreamTask {
 }
 
 message LogStreamTask {
+    uint32 task_id = 1;
+}
+
+message SinkTask {
     uint32 task_id = 1;
 }
 

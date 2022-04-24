@@ -1,8 +1,8 @@
 syntax="proto3";
 
-package yandexcloud.datatransfer.dtextension.source.v1;
+package yandexcloud.datatransfer.dtextension.v1.source;
 
-import "common.proto";
+import "v1/common.proto";
 
 message TableGuarantee {
   Table table = 1;

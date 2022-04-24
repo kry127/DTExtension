@@ -1,9 +1,9 @@
 syntax="proto3";
 
-package yandexcloud.datatransfer.dtextension.source.v1;
+package yandexcloud.datatransfer.dtextension.v1;
 
-import "common.proto";
-import "tasks.proto";
+import "v1/common.proto";
+import "v1/tasks.proto";
 
 service TaskService {
     rpc GetTask(TaskId) returns (Task);
@@ -13,7 +13,10 @@ service TaskService {
     rpc GetChildTasks(TaskId) returns (TaskIds);
 
     rpc SplitTask(TaskId) returns (SplitTaskResponse);
+    // applicable for snapshot task and stream task
     rpc GetChangeItems(stream GetChangeItemsRequest) returns (stream GetChangeItemsResponse);
+    // applicable for sink task
+    rpc PutChangeItems(stream PutChangeItemsRequest) returns (stream PutChangeItemsResponse);
 }
 
 message TaskId {
@@ -36,11 +39,22 @@ message SplitTaskResponse {
 }
 
 message GetChangeItemsRequest {
-    uint64 begin_from_lsn = 1;
+    uint64 task_id = 1;
+    uint64 begin_from_lsn = 2;
 }
 
 message GetChangeItemsResponse {
     uint64 stream_lsn = 1;
     repeated ChangeItem change_item = 2;
+}
+
+message PutChangeItemsRequest {
+    uint64 task_id = 1;
+    uint64 stream_lsn = 2;
+    repeated ChangeItem change_item = 3;
+}
+
+message PutChangeItemsResponse {
+    uint64 last_lsn = 1;
 }
 
