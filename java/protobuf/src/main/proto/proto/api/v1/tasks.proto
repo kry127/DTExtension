@@ -1,0 +1,110 @@
+syntax="proto3";
+
+package yandexcloud.datatransfer.dtextension.v1;
+
+import "proto/api/v1/common.proto";
+import "google/protobuf/wrappers.proto";
+
+// This guarantee should be provided by third-party endpoint code:
+enum TaskFailoverType {
+    // unknown failover type, assume Full Restart as default
+    TASK_FAILOVER_TYPE_UNSPECIFIED = 0;
+    // the only way to produce At Least Once after failover: Full Restart. No guarantees from user endpoint code
+    TASK_FAILOVER_TYPE_FULL_RESTART = 1;
+    // endpoint code should provide commit entity from which restart process (e.g. monotonic column)
+    // restoration after failover and reading from commit point may produce other sequence of messages than before
+    TASK_FAILOVER_TYPE_COMMITABLE = 2;
+    // endpoint code should provide commit entity from which restart process
+    // restoration after failover and reading from commit point is guarantee to reproduce the same sequence of events
+    TASK_FAILOVER_TYPE_REPLAYABLE = 3;
+}
+
+message Task {
+    TaskFailoverType failover_type = 1;
+    oneof task {
+        SnapshotTask snapshot_task = 2;
+        StreamTask stream_task = 3;
+        SinkTask sink_task = 4;
+    }
+}
+
+message SnapshotTask {
+    oneof stream_task {
+        TableSnapshotTask table_snapshot_task = 1;
+        SplittableTableSnapshotTask splittable_table_snapshot_task = 2;
+    }
+}
+
+message StreamTask {
+    oneof stream_task {
+        WholeStreamTask whole_stream_task = 1;
+        DatabaseStreamTask database_stream_task = 2;
+        TableStreamTask table_stream_task = 3;
+        LogStreamTask log_stream_task = 4;
+    }
+}
+
+message PersistedTask {
+    TaskFailoverType failover_type = 1;
+    uint32 task_id = 2;
+    bytes user_persisted_task = 3;
+    // this can be null if failover type is Full Restart
+    Checkpoint checkpoint = 4;
+
+    // Developer of connector required to provide database-specific deduplicator 'user_defined_lsn'
+    // and should be available to marshal and unmarshal it to 'user_defined_lsn'.
+    // Everytime we save task state "persisted task" we store mapping of our 'synthetic_lsn' to 'user_defined_lsn'
+    // so we can perform deduplication without even knowing about database type at all!
+    // this allows **failover deduplication** -- after task restore we know, how many messages we should skip.
+    // For instance: we've ended up with LSN: 215 and task crashed, restored it at LSN: 209, and we know, that
+    // six more change items from user should be skipped.
+    message Checkpoint {
+        uint64 synthetic_lsn = 1;
+        bytes user_defined_lsn = 2;
+    }
+}
+
+message TableSnapshotTask {
+    uint32 task_id = 1;
+    string table_name = 2;
+    Progress progress = 3;
+}
+
+message SplittableTableSnapshotTask {
+    uint32 task_id = 1;
+    string table_name = 2;
+    Progress progress = 3;
+    .google.protobuf.UInt32Value parent_task_id = 4;
+    repeated uint32 child_tasks = 5;
+}
+
+message WholeStreamTask {
+    uint32 task_id = 1;
+}
+
+message DatabaseStreamTask {
+    uint32 task_id = 1;
+    string database = 2;
+}
+
+message TableStreamTask {
+    uint32 task_id = 1;
+    Table table = 2;
+}
+
+message LogStreamTask {
+    uint32 task_id = 1;
+}
+
+message SinkTask {
+    uint32 task_id = 1;
+}
+
+
+message Progress {
+    uint64 uploaded_count = 1;
+    oneof eta_method {
+        uint64 max_count = 2;
+        float user_eta = 3;
+    }
+}

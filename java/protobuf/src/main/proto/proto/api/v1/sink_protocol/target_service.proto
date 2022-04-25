@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package yandexcloud.datatransfer.dtextension.v1.sink;
+
+import "proto/api/v1/common.proto";
+import "proto/api/v1/tasks.proto";
+
+service SinkInterface {
+    rpc ConfigureEndpoint(ConfigureEndpointRequest) returns (ConfigureEndpointResponse);
+    rpc RestoreEndpoint(RestoreEndpointRequest) returns (ConfigureEndpointResponse);
+
+    rpc Activate(ActivateRequest) returns (ErrorResponse);
+    rpc Dectivate(DeactivateRequest) returns (ErrorResponse);
+
+    rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
+}
+
+message ConfigureEndpointRequest {
+    string transfer_id = 1;
+    string endpoint_config = 2;
+}
+
+message RestoreEndpointRequest {
+    ConfigureEndpointRequest config = 1;
+    repeated PersistedTask persisted_tasks = 2;
+}
+
+message ActivateRequest {
+    string transfer_id = 1;
+}
+
+message DeactivateRequest {
+    string transfer_id = 1;
+}
+
+message HealthcheckRequest {
+    string transfer_id = 1;
+}
+
+message HealthcheckResponse {
+    string transfer_id = 1;
+    Status status = 2;
+
+    enum Status {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_IDLE = 1;
+        STATUS_RUNNING = 2;
+        STATUS_STOPPED = 3;
+    }
+}
+
+message ConfigureEndpointResponse {
+    oneof response {
+        Ok ok = 1;
+        ErrorResponse error = 2;
+    }
+
+    message Ok {
+        repeated Task tasks = 1;
+        repeated PersistedTask persisted_tasks = 2;
+    }
+}

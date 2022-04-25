@@ -1,0 +1,70 @@
+syntax="proto3";
+
+package yandexcloud.datatransfer.dtextension.v1.source;
+
+import "proto/api/v1/common.proto";
+import "proto/api/v1/tasks.proto";
+import "proto/api/v1/source_protocol/table_guarantee.proto";
+
+service SourceInterface {
+    // accepts endpoint configuration and giveout plan of tasks
+    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
+    rpc ConfigureEndpoint(ConfigureEndpointRequest) returns (ConfigureEndpointResponse);
+    // configures endpoint on failover with persisted tasks (e.g. used for deactivation)
+    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
+    rpc RestoreEndpoint(RestoreEndpointRequest) returns (ConfigureEndpointResponse);
+
+    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
+    rpc Activate(ActivateRequest) returns (ErrorResponse);
+    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
+    rpc Dectivate(DeactivateRequest) returns (ErrorResponse);
+
+    rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
+}
+
+message ConfigureEndpointRequest {
+    string transfer_id = 1;
+    string endpoint_config = 2;
+    repeated TableGuarantee table_guarantees = 3;
+}
+
+message RestoreEndpointRequest {
+    ConfigureEndpointRequest config = 1;
+    repeated PersistedTask persisted_tasks = 2;
+}
+
+message ActivateRequest {
+    string transfer_id = 1;
+}
+
+message DeactivateRequest {
+    string transfer_id = 1;
+}
+
+message HealthcheckRequest {
+    string transfer_id = 1;
+}
+
+message HealthcheckResponse {
+    string transfer_id = 1;
+    Status status = 2;
+
+    enum Status {
+        STATUS_UNSPECIFIED = 0;
+        STATUS_IDLE = 1;
+        STATUS_RUNNING = 2;
+        STATUS_STOPPED = 3;
+    }
+}
+
+message ConfigureEndpointResponse {
+    oneof response {
+        Ok ok = 1;
+        ErrorResponse error = 2;
+    }
+
+    message Ok {
+        repeated Task tasks = 1;
+        repeated PersistedTask persisted_tasks = 2;
+    }
+}

@@ -1,0 +1,23 @@
+syntax="proto3";
+
+package yandexcloud.datatransfer.dtextension.v1.source;
+
+import "proto/api/v1/common.proto";
+
+message TableGuarantee {
+  Table table = 1;
+  bool addition_only = 2;
+  MonoColumnDescription mono_column = 3;
+
+  // note, that we can have strict monotonicity on cartesian product of columns: AxBxC
+  // it is easily get converted to non-strict monotonicity on column A.
+  // Some beliefs:
+  //  a. I think no one wishes to implement query with condition
+  //     WHERE (minA, minB, minC) < (A, B, C) < (maxA, maxB, maxC) -- it is too hard to implement
+  //  b. non-strict monotonicity by column A promises not bad perfomance though
+  message MonoColumnDescription {
+    string column_name = 1;
+    bool strict = 2;
+    bool descending = 3;
+  }
+}
