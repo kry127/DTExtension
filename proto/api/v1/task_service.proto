@@ -2,8 +2,8 @@ syntax="proto3";
 
 package yandexcloud.datatransfer.dtextension.v1;
 
-import "v1/common.proto";
-import "v1/tasks.proto";
+import "proto/api/v1/common.proto";
+import "proto/api/v1/tasks.proto";
 
 service TaskService {
     rpc GetTask(TaskId) returns (Task);
