@@ -57,7 +57,7 @@ message SnapshotTask {
 
 message StreamTask {
     oneof stream_task {
-        WholeStreamTask whole_stream_task = 1;
+        ClusterStreamTask whole_stream_task = 1;
         DatabaseStreamTask database_stream_task = 2;
         TableStreamTask table_stream_task = 3;
         LogStreamTask log_stream_task = 4;
@@ -99,7 +99,7 @@ message SplittableTableSnapshotTask {
     repeated uint32 child_tasks = 5;
 }
 
-message WholeStreamTask {
+message ClusterStreamTask {
     uint32 task_id = 1;
 }
 
