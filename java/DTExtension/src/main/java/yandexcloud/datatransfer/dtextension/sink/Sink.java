@@ -1,4 +1,4 @@
-package yandexcloud.datatransfer.dtextension.source;
+package yandexcloud.datatransfer.dtextension.sink;
 
 
 import io.grpc.Server;
@@ -8,15 +8,16 @@ import yandexcloud.datatransfer.dtextension.v1.Common;
 import yandexcloud.datatransfer.dtextension.v1.TaskServiceGrpc;
 import yandexcloud.datatransfer.dtextension.v1.TaskServiceOuterClass;
 import yandexcloud.datatransfer.dtextension.v1.Tasks;
-import yandexcloud.datatransfer.dtextension.v1.source.SourceInterfaceGrpc;
+import yandexcloud.datatransfer.dtextension.v1.sink.SinkInterfaceGrpc;
+import yandexcloud.datatransfer.dtextension.v1.sink.TargetService;
 
 import java.io.IOException;
 
-public final class Source {
+public final class Sink {
     private final int port;
     private final Server server;
     private final TasksFactory factory;
-    private final GrpcSourceService sourceService;
+    private final GrpcSinkService sinkService;
     private final GrpcTaskService taskService;
 
     /**
@@ -25,49 +26,44 @@ public final class Source {
      * @param port for gRPC service
      * @param factory for user defined code
      */
-    public Source(int port, TasksFactory factory) throws IOException {
+    public Sink(int port, TasksFactory factory) throws IOException {
         this.port = port;
         this.factory = factory;
-        this.sourceService = new GrpcSourceService();
+        this.sinkService = new GrpcSinkService();
         this.taskService = new GrpcTaskService();
 
         this.server = ServerBuilder
                 .forPort(port)
-                .addService(this.sourceService)
+                .addService(this.sinkService)
                 .addService(this.taskService)
                 .build();
         this.server.start();
     }
 
-    private static class GrpcSourceService extends SourceInterfaceGrpc.SourceInterfaceImplBase {
+    private static class GrpcSinkService extends SinkInterfaceGrpc.SinkInterfaceImplBase {
         @Override
-        public void configureEndpoint(yandexcloud.datatransfer.dtextension.v1.source.SourceService.ConfigureEndpointRequest request, StreamObserver<yandexcloud.datatransfer.dtextension.v1.source.SourceService.ConfigureEndpointResponse> responseObserver) {
+        public void configureEndpoint(TargetService.ConfigureEndpointRequest request, StreamObserver<TargetService.ConfigureEndpointResponse> responseObserver) {
             super.configureEndpoint(request, responseObserver);
-            throw new UnsupportedOperationException("Implement me");
         }
 
         @Override
-        public void restoreEndpoint(yandexcloud.datatransfer.dtextension.v1.source.SourceService.RestoreEndpointRequest request, StreamObserver<yandexcloud.datatransfer.dtextension.v1.source.SourceService.ConfigureEndpointResponse> responseObserver) {
+        public void restoreEndpoint(TargetService.RestoreEndpointRequest request, StreamObserver<TargetService.ConfigureEndpointResponse> responseObserver) {
             super.restoreEndpoint(request, responseObserver);
-            throw new UnsupportedOperationException("Implement me");
         }
 
         @Override
-        public void activate(yandexcloud.datatransfer.dtextension.v1.source.SourceService.ActivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
+        public void activate(TargetService.ActivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
             super.activate(request, responseObserver);
-            throw new UnsupportedOperationException("Implement me");
         }
 
         @Override
-        public void dectivate(yandexcloud.datatransfer.dtextension.v1.source.SourceService.DeactivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
+        public void dectivate(TargetService.DeactivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
             super.dectivate(request, responseObserver);
-            throw new UnsupportedOperationException("Implement me");
         }
 
         @Override
-        public void healthcheck(yandexcloud.datatransfer.dtextension.v1.source.SourceService.HealthcheckRequest request, StreamObserver<yandexcloud.datatransfer.dtextension.v1.source.SourceService.HealthcheckResponse> responseObserver) {
+        public void healthcheck(TargetService.HealthcheckRequest request, StreamObserver<TargetService.HealthcheckResponse> responseObserver) {
             super.healthcheck(request, responseObserver);
-            throw new UnsupportedOperationException("Implement me");
         }
     }
 

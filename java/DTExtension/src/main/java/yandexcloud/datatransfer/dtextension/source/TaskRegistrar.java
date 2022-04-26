@@ -14,5 +14,4 @@ public interface TaskRegistrar {
 
     void RegisterTableSnapshotTask(TableSnapshotTask snapshotTask, SourceTaskFailoverType failoverType);
     void RegisterStreamTask(StreamTask streamTask, SourceTaskFailoverType failoverType);
-    void RegisterSinkTask(SinkTask sinkTask, SinkTaskWriteSemantics sinkSemantics);
 }
