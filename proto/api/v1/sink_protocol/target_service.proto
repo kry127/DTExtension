@@ -22,7 +22,12 @@ message ConfigureEndpointRequest {
 
 message RestoreEndpointRequest {
     ConfigureEndpointRequest config = 1;
-    repeated PersistedTask persisted_tasks = 2;
+    repeated LsnPersistedTask persisted_tasks = 2;
+
+    message LsnPersistedTask {
+        uint64 last_commited_lsn = 1;
+        PersistedTask persisted_task = 2;
+    }
 }
 
 message ActivateRequest {
