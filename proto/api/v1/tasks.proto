@@ -6,25 +6,42 @@ import "proto/api/v1/common.proto";
 import "google/protobuf/wrappers.proto";
 
 // This guarantee should be provided by third-party endpoint code:
-enum TaskFailoverType {
+enum SourceTaskFailoverType {
     // unknown failover type, assume Full Restart as default
-    TASK_FAILOVER_TYPE_UNSPECIFIED = 0;
+    SOURCE_TASK_FAILOVER_TYPE_UNSPECIFIED = 0;
     // the only way to produce At Least Once after failover: Full Restart. No guarantees from user endpoint code
-    TASK_FAILOVER_TYPE_FULL_RESTART = 1;
+    SOURCE_TASK_FAILOVER_TYPE_FULL_RESTART = 1;
     // endpoint code should provide commit entity from which restart process (e.g. monotonic column)
     // restoration after failover and reading from commit point may produce other sequence of messages than before
-    TASK_FAILOVER_TYPE_COMMITABLE = 2;
+    SOURCE_TASK_FAILOVER_TYPE_COMMITABLE = 2;
     // endpoint code should provide commit entity from which restart process
     // restoration after failover and reading from commit point is guarantee to reproduce the same sequence of events
-    TASK_FAILOVER_TYPE_REPLAYABLE = 3;
+    SOURCE_TASK_FAILOVER_TYPE_REPLAYABLE = 3;
+}
+
+// this doesn't affect behaviour of dataplane, just for info though...
+enum SinkTaskWriteSemantics {
+    SINK_TASK_WRITE_SEMANTICS_UNSPECIFIED = 0;
+    // sink is unavailable to perform deduplication
+    SINK_TASK_WRITE_SEMANTICS_AT_LEAST_ONCE = 1;
+    // sink is available to perform deduplication
+    // e.g. if user endpoint gets restarted, it will be able to deduplicate
+    // repeated events coming from dataplane. This is strong guarantee
+    SINK_TASK_WRITE_SEMANTICS_EXACTLY_ONCE = 2;
 }
 
 message Task {
-    TaskFailoverType failover_type = 1;
     oneof task {
+        SourceTask source_task = 1;
+        SinkTask sink_task = 2;
+    }
+}
+
+message SourceTask {
+    SourceTaskFailoverType failover_type = 1;
+    oneof source_task {
         SnapshotTask snapshot_task = 2;
         StreamTask stream_task = 3;
-        SinkTask sink_task = 4;
     }
 }
 
@@ -45,7 +62,7 @@ message StreamTask {
 }
 
 message PersistedTask {
-    TaskFailoverType failover_type = 1;
+    SourceTaskFailoverType failover_type = 1;
     uint32 task_id = 2;
     bytes user_persisted_task = 3;
     // this can be null if failover type is Full Restart
@@ -98,6 +115,7 @@ message LogStreamTask {
 
 message SinkTask {
     uint32 task_id = 1;
+    SinkTaskWriteSemantics sink_semantics = 2;
 }
 
 
