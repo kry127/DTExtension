@@ -66,5 +66,6 @@ message ConfigureEndpointResponse {
     message Ok {
         repeated Task tasks = 1;
         repeated PersistedTask persisted_tasks = 2;
+        string message_format = 3;
     }
 }
