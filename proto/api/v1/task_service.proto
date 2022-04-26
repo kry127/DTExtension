@@ -20,7 +20,8 @@ service TaskService {
 }
 
 message TaskId {
-    uint32 task_id = 1;
+    string transfer_id = 1;
+    uint32 task_id = 2;
 }
 
 message TaskIds {
@@ -39,7 +40,7 @@ message SplitTaskResponse {
 }
 
 message GetChangeItemsRequest {
-    uint64 task_id = 1;
+    TaskId task_id = 1;
     uint64 begin_from_lsn = 2;
 }
 
@@ -49,7 +50,7 @@ message GetChangeItemsResponse {
 }
 
 message PutChangeItemsRequest {
-    uint64 task_id = 1;
+    TaskId task_id = 1;
     uint64 stream_lsn = 2;
     repeated ChangeItem change_item = 3;
 }
