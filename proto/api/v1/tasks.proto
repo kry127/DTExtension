@@ -26,7 +26,10 @@ enum SinkTaskWriteSemantics {
     SINK_TASK_WRITE_SEMANTICS_AT_LEAST_ONCE = 1;
     // sink is available to perform deduplication
     // e.g. if user endpoint gets restarted, it will be able to deduplicate
-    // repeated events coming from dataplane. This is strong guarantee
+    // repeated events coming from dataplane. This is strong guarantee.
+    // This can be asked by user of Data Transfer when passing settings to sink endpoint.
+    // If endpoint code and destination supports exactly once, it can mark worker with
+    // this trait. But behavior of dataplane won't change
     SINK_TASK_WRITE_SEMANTICS_EXACTLY_ONCE = 2;
 }
 
@@ -62,11 +65,12 @@ message StreamTask {
 }
 
 message PersistedTask {
-    SourceTaskFailoverType failover_type = 1;
-    uint32 task_id = 2;
-    bytes user_persisted_task = 3;
+    SourceTaskFailoverType source_failover_type = 1;
+    SinkTaskWriteSemantics sink_semantics = 2;
+    uint32 task_id = 3;
+    bytes user_persisted_task = 4;
     // this can be null if failover type is Full Restart
-    Checkpoint checkpoint = 4;
+    Checkpoint checkpoint = 5;
 
     // Developer of connector required to provide database-specific deduplicator 'user_defined_lsn'
     // and should be available to marshal and unmarshal it to 'user_defined_lsn'.
