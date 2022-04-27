@@ -1,22 +1,15 @@
-syntax="proto3";
+syntax = "proto3";
 
-package yandexcloud.datatransfer.dtextension.v1.source;
+package yandexcloud.datatransfer.dtextension.v0_1.sink;
 
-import "proto/api/v1/common.proto";
-import "proto/api/v1/tasks.proto";
-import "proto/api/v1/source_protocol/table_guarantee.proto";
+import "api/v0_1/common.proto";
+import "api/v0_1/tasks.proto";
 
-service SourceInterface {
-    // accepts endpoint configuration and giveout plan of tasks
-    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
+service SinkInterface {
     rpc ConfigureEndpoint(ConfigureEndpointRequest) returns (ConfigureEndpointResponse);
-    // configures endpoint on failover with persisted tasks (e.g. used for deactivation)
-    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
     rpc RestoreEndpoint(RestoreEndpointRequest) returns (ConfigureEndpointResponse);
 
-    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
     rpc Activate(ActivateRequest) returns (ErrorResponse);
-    // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
     rpc Deactivate(DeactivateRequest) returns (ErrorResponse);
 
     rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
@@ -25,7 +18,6 @@ service SourceInterface {
 message ConfigureEndpointRequest {
     string transfer_id = 1;
     string endpoint_config = 2;
-    repeated TableGuarantee table_guarantees = 3;
 }
 
 message RestoreEndpointRequest {

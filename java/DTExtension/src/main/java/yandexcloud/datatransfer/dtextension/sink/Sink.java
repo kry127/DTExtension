@@ -4,12 +4,12 @@ package yandexcloud.datatransfer.dtextension.sink;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
-import yandexcloud.datatransfer.dtextension.v1.Common;
-import yandexcloud.datatransfer.dtextension.v1.TaskServiceGrpc;
-import yandexcloud.datatransfer.dtextension.v1.TaskServiceOuterClass;
-import yandexcloud.datatransfer.dtextension.v1.Tasks;
-import yandexcloud.datatransfer.dtextension.v1.sink.SinkInterfaceGrpc;
-import yandexcloud.datatransfer.dtextension.v1.sink.TargetService;
+import yandexcloud.datatransfer.dtextension.v0_1.Common;
+import yandexcloud.datatransfer.dtextension.v0_1.TaskServiceGrpc;
+import yandexcloud.datatransfer.dtextension.v0_1.TaskServiceOuterClass;
+import yandexcloud.datatransfer.dtextension.v0_1.Tasks;
+import yandexcloud.datatransfer.dtextension.v0_1.sink.SinkInterfaceGrpc;
+import yandexcloud.datatransfer.dtextension.v0_1.sink.TargetService;
 
 import java.io.IOException;
 

@@ -3,9 +3,9 @@ package yandexcloud.datatransfer.dtextension.source;
 import yandexcloud.datatransfer.dtextension.cdc.Table;
 import yandexcloud.datatransfer.dtextension.guaranties.MonoColumnDescription;
 import yandexcloud.datatransfer.dtextension.guaranties.TableGuarantee;
-import yandexcloud.datatransfer.dtextension.v1.Common;
-import yandexcloud.datatransfer.dtextension.v1.source.SourceService;
-import yandexcloud.datatransfer.dtextension.v1.source.TableGuaranteeOuterClass;
+import yandexcloud.datatransfer.dtextension.v0_1.Common;
+import yandexcloud.datatransfer.dtextension.v0_1.source.SourceService;
+import yandexcloud.datatransfer.dtextension.v0_1.source.TableGuaranteeOuterClass;
 
 import java.util.stream.Collectors;
 
