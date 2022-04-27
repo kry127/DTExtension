@@ -1,4 +1,4 @@
-package yandexcloud.datatransfer.dtextension.task;
+package yandexcloud.datatransfer.dtextension.guaranties;
 
 /**
  * Enum 'SourceTaskFailoverType' specifies guaranties that developer of connector can produce.

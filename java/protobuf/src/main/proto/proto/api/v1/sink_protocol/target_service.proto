@@ -10,7 +10,7 @@ service SinkInterface {
     rpc RestoreEndpoint(RestoreEndpointRequest) returns (ConfigureEndpointResponse);
 
     rpc Activate(ActivateRequest) returns (ErrorResponse);
-    rpc Dectivate(DeactivateRequest) returns (ErrorResponse);
+    rpc Deactivate(DeactivateRequest) returns (ErrorResponse);
 
     rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }

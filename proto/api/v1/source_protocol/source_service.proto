@@ -17,7 +17,7 @@ service SourceInterface {
     // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
     rpc Activate(ActivateRequest) returns (ErrorResponse);
     // TODO protect from Request duplication: https://cloud.google.com/apis/design/design_patterns#request_duplication
-    rpc Dectivate(DeactivateRequest) returns (ErrorResponse);
+    rpc Deactivate(DeactivateRequest) returns (ErrorResponse);
 
     rpc Healthcheck(HealthcheckRequest) returns (HealthcheckResponse);
 }

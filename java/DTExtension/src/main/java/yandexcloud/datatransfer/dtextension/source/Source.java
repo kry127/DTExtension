@@ -59,8 +59,8 @@ public final class Source {
         }
 
         @Override
-        public void dectivate(yandexcloud.datatransfer.dtextension.v1.source.SourceService.DeactivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
-            super.dectivate(request, responseObserver);
+        public void deactivate(yandexcloud.datatransfer.dtextension.v1.source.SourceService.DeactivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
+            super.deactivate(request, responseObserver);
             throw new UnsupportedOperationException("Implement me");
         }
 

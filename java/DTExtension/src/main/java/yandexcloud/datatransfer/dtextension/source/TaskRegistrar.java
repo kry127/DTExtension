@@ -1,5 +1,6 @@
 package yandexcloud.datatransfer.dtextension.source;
 
+import yandexcloud.datatransfer.dtextension.guaranties.SourceTaskFailoverType;
 import yandexcloud.datatransfer.dtextension.task.*;
 
 /**

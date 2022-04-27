@@ -1,4 +1,4 @@
-package yandexcloud.datatransfer.dtextension.task;
+package yandexcloud.datatransfer.dtextension.guaranties;
 
 /**
  * Enum `SinkTaskWriteSemantics` is indicator of write mode to destination.

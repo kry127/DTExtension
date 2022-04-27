@@ -57,8 +57,8 @@ public final class Sink {
         }
 
         @Override
-        public void dectivate(TargetService.DeactivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
-            super.dectivate(request, responseObserver);
+        public void deactivate(TargetService.DeactivateRequest request, StreamObserver<Common.ErrorResponse> responseObserver) {
+            super.deactivate(request, responseObserver);
         }
 
         @Override

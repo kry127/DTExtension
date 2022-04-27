@@ -1,5 +1,6 @@
 package yandexcloud.datatransfer.dtextension.sink;
 
+import yandexcloud.datatransfer.dtextension.guaranties.SinkTaskWriteSemantics;
 import yandexcloud.datatransfer.dtextension.task.*;
 
 /**
