@@ -14,11 +14,5 @@ import java.util.function.Consumer;
  * <p>
  * Events are generated in default format. Other formats are also applicable
  */
-public interface StreamTask {
-    /**
-     * This method emits change items from database to the target
-     *
-     * @param changeItemsConsumer a consumer of change item sequence
-     */
-    void emitChangeItems(Consumer<ChangeItem> changeItemsConsumer);
+public interface StreamTask extends SourceTask {
 }

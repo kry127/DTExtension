@@ -11,7 +11,7 @@ public interface TaskRegistrar {
      * Registering of sourceEndpoint replaces the default implementation
      * @param sourceEndpoint
      */
-    void RegisterSourceEndpoint(SourceEndpoint sourceEndpoint);
+    void RegisterSourceEndpoint(TransferLifecycle sourceEndpoint);
 
     void RegisterTableSnapshotTask(TableSnapshotTask snapshotTask, SourceTaskFailoverType failoverType);
     void RegisterStreamTask(StreamTask streamTask, SourceTaskFailoverType failoverType);

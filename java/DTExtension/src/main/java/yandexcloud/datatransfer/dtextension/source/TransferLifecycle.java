@@ -9,7 +9,7 @@ package yandexcloud.datatransfer.dtextension.source;
  * This guaranties AtLeastOnce semantics. If you need ExactlyOnceSemantics you may implement more intricate
  * way of activation, for instance, transactional saving of LSN for table Snapshot and Stream.
  */
-public interface SourceEndpoint {
+public interface TransferLifecycle {
     /**
      * Activate is called on transfer activation. That means that here you should provision
      * resources: create slot for PostgreSQL, or maybe create table for healtheck pings,

@@ -9,6 +9,7 @@ public interface TasksFactory {
      * in tasks registrar with available transfer semantics
      * @param parameters specifies user parameters for endpoint and known nature of data
      * @param registrar object that should be used to register tasks
+     * @return result of configuration:
      */
     void RegisterTasks(EndpointConfigParameters parameters, TaskRegistrar registrar);
 }
