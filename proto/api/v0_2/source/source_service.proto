@@ -11,15 +11,16 @@ service SourceService {
     // In order to see specification see Spec handle
     rpc Check(CheckReq) returns (CheckRsp) {}
     // Method discover is used to fetch available replication objects
-    //
     rpc Discover(DiscoverReq) returns (DiscoverRsp) {}
 
+    rpc Read(ReadReq) returns (ReadRsp) {}
+    rpc Stream(stream StreamReq) returns (stream StreamRsp) {}
 }
 
 message SpecReq {}
 message SpecRsp {
     Result result = 1;
-    string avro_schema = 1;
+    string avro_schema = 2;
 }
 
 message CheckReq {
@@ -38,4 +39,35 @@ message DiscoverReq {
 message DiscoverResp {
     Result result = 1;
     repeated Table tables = 2;
+}
+
+message ReadReq {
+    Table table = 1;
+    Cursor cursor = 2;
+    ReadControlItemReq control_item_req = 3;
+
+}
+message ReadRsp {
+    Result result = 1;
+    Cursor cursor = 2;
+    ReadControlItemRsp control_item_rsp = 3;
+}
+
+message StreamReq {
+    oneof source {
+        Table table = 1;
+        Namespace namespace = 2;
+        Cluster cluster = 3;
+    }
+    // this is also exclusive (as in data range)
+    // can be null on initialization or when replication begins immediately
+    // by the way, in MySQL/MongoDB we can make simple check: if LSN is presented in log, then
+    // we have nothing missed. Otherwise, we missed the log position =(
+    ColumnData lsn = 2;
+    StreamControlItemReq control_item_req = 3;
+}
+message StreamRsp {
+    Result result = 1;
+    ColumnData lsn = 2;
+    StreamControlItemRsp control_item_rsp = 3;
 }

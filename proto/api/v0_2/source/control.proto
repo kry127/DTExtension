@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2.source;
+
+message ReadControlItemReq {
+    oneof control_item_req {
+        DataItemReq data_item_req = 1;
+        DataRangeReq data_range_req = 2;
+        SplitReq split_req = 3;
+        BeginSnapshotReq begin_snapshot_req = 4;
+        DoneSnapshotReq done_snapshot_req = 5;
+    }
+}
+
+message ReadControlItemRsp {
+    oneof control_item_rsp {
+        DataItemRsp data_item_rsp = 1;
+        DataRangeRsp data_range_rsp = 2;
+        SplitRsp split_rsp = 3;
+        BeginSnapshotRsp begin_snapshot_rsp = 4;
+        DoneSnapshotRsp done_snapshot_rsp = 5;
+    }
+}
+
+message DataRangeReq {}
+message DataRangeRsp {
+    Result result = 1;
+    DataRange data_range = 2;
+}
+
+message SplitReq {
+    DataRange data_range = 1;
+}
+message SplitRsp {
+    Result result = 1;
+    repeated DataRange data_range = 2;
+}
+
+message BeginSnapshotReq {}
+message BeginSnapshotRsp {
+    Result result = 1;
+}
+
+message DoneSnapshotReq {}
+message DoneSnapshotRsp {
+    Result result = 1;
+}
+
+
+message DataItemReq {}
+message DataItemRsp {
+    Result result = 1;
+    ChangeItem change_item = 2;
+}
+
+message StreamControlItemReq {
+    oneof control_item_req {
+        DataItemReq data_item_req = 1;
+        FixLsnReq fix_lsn_req = 2;
+        CheckLsnReq check_lsn_req = 3;
+    }
+}
+
+message StreamControlItemRsp {
+    oneof control_item_rsp {
+        DataItemRsp data_item_rsp = 1;
+        FixLsnRsp fix_lsn_rsp = 2;
+        CheckLsnRsp check_lsn_rsp = 3;
+    }
+}
+
+message FixLsnReq {}
+message FixLsnRsp {
+    Result result = 1;
+    ColumnData lsn = 2;
+}
+
+message CheckLsnReq {
+    ColumnData lsn = 1;
+}
+message CheckLsnRsp {
+    Result result = 1;
+}
