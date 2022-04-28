@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+// Author: kry127
+
+package yandexcloud.datatransfer.dtextension.v0_2.sink;
+
+import "api/v0_2/common.proto";
+
+// Control item requests for snapshot process
+message WriteControlItemReq {
+    oneof control_item_req {
+        BeginWriteSnapshotReq begin_snapshot_req = 1;
+        DoneWriteSnapshotReq done_snapshot_req = 2;
+    }
+}
+
+// Control item response for snapshot process
+message WriteControlItemRsp {
+    oneof control_item_rsp {
+        BeginWriteSnapshotRsp begin_snapshot_req = 1;
+        DoneWriteSnapshotRsp done_snapshot_req = 2;
+    }
+}
+
+// Indicates the begginning of the snapshot progress for table
+// can be used to initiate writing in temporary table, for example
+message BeginWriteSnapshotReq {
+    Table table = 1;
+}
+message BeginWriteSnapshotRsp {
+    Result result = 1;
+}
+
+// Indicates the ending of the snapshot progress for table
+// Can be used for publishing temporary table, or committing the transaction to make table visible
+message DoneWriteSnapshotReq {
+    Table table = 1;
+}
+message DoneWriteSnapshotRsp {
+    Result result = 1;
+}

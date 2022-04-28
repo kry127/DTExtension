@@ -7,6 +7,22 @@ message Result {
     string error = 2;
 }
 
+message SpecReq {}
+// SpecRsp is response of Spec handle that declares setting that endpoint has
+// with the use of AVRO schema
+message SpecRsp {
+    Result result = 1;
+    string avro_schema = 2;
+}
+
+message CheckReq {
+    // this JSON should comply to SpecRsp.avro_schema returned by 'Spec' handle
+    string json_spec = 1;
+}
+message CheckRsp {
+    Result result = 1;
+}
+
 message Namespace {
     string namespace = 1;
 }
