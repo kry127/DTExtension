@@ -5,7 +5,7 @@ package yandexcloud.datatransfer.dtextension.v0_2.sink;
 import "api/v0_2/common.proto";
 import "api/v0_2/sink/control.proto";
 
-service SourceService {
+service SinkService {
     // Spec is method for determining endpoint settings available for configuring
     rpc Spec(SpecReq) returns (SpecRsp) {}
     // Check is method that checks settings of endpoint are comply to specification
