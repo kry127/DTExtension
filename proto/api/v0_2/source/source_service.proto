@@ -1,0 +1,41 @@
+syntax="proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2.source;
+
+import "api/v0_2/common.proto";
+
+service SourceService {
+    // Spec is method for determining endpoint settings available for configuring
+    rpc Spec(SpecReq) returns (SpecRsp) {}
+    // Check is method that checks settings of endpoint are comply to specification
+    // In order to see specification see Spec handle
+    rpc Check(CheckReq) returns (CheckRsp) {}
+    // Method discover is used to fetch available replication objects
+    //
+    rpc Discover(DiscoverReq) returns (DiscoverRsp) {}
+
+}
+
+message SpecReq {}
+message SpecRsp {
+    Result result = 1;
+    string avro_schema = 1;
+}
+
+message CheckReq {
+    // this JSON should comply to SpecRsp.avro_schema returned by 'Spec' handle
+    string json_spec = 1;
+}
+message CheckRsp {
+    Result result = 1;
+}
+
+message DiscoverReq {
+    // this JSON should comply to SpecRsp.avro_schema returned by 'Spec' handle
+    // and should be verified by Check rpc handle as compliant
+    string json_spec = 1;
+}
+message DiscoverResp {
+    Result result = 1;
+    repeated Table tables = 2;
+}

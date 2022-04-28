@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2;
+
+message Result {
+    bool ok = 1;
+    string error = 2;
+}
+
+message Namespace {
+    string namespace = 1;
+}
+
+message Table {
+    Namespace namespace = 1;
+    string name = 2;
+    Schema schema = 3;
+}
+
+message Schema {
+    repeated Column columns = 1;
+}
+
+message Column {
+    string name = 1;
+    string type = 2;
+    bool key = 3;
+}
