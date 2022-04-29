@@ -8,6 +8,7 @@ syntax = "proto3";
 package yandexcloud.datatransfer.dtextension.v0_2.source;
 
 import "api/v0_2/common.proto";
+import "api/v0_2/data.proto";
 
 // Control item requests for snapshot process
 message ReadControlItemReq {
@@ -148,14 +149,14 @@ message StreamControlItemRsp {
 message FixLsnReq {}
 message FixLsnRsp {
     Result result = 1;
-    ColumnData lsn = 2;
+    ColumnValue lsn = 2;
     // this is an optional field if source have to store some additional info for fixing LSN position
     bytes replication_state = 3;
 }
 
 // This message queries is LSN is still presented in the stream
 message CheckLsnReq {
-    ColumnData lsn = 1;
+    ColumnValue lsn = 1;
 }
 message CheckLsnRsp {
     Result result = 1;
