@@ -9,44 +9,55 @@ import "api/v0_2/common.proto";
 // Control item requests for snapshot process
 message WriteControlItemReq {
     oneof control_item_req {
-        InitConnectionReq init_connection_req = 1;
-        BeginWriteSnapshotReq begin_snapshot_req = 2;
-        DoneWriteSnapshotReq done_snapshot_req = 3;
+        WriteInitConnectionReq init_connection_req = 1;
+        WriteDataItemReq data_item_req = 2;
+        WriteBeginSnapshotReq begin_snapshot_req = 3;
+        WriteDoneSnapshotReq done_snapshot_req = 4;
     }
 }
 
 // Control item response for snapshot process
 message WriteControlItemRsp {
     oneof control_item_rsp {
-        InitConnectionRsp init_connection_rsp = 1;
-        BeginWriteSnapshotRsp begin_snapshot_req = 2;
-        DoneWriteSnapshotRsp done_snapshot_req = 3;
+        WriteInitConnectionRsp init_connection_rsp = 1;
+        WriteDataItemRsp data_item_req = 2;
+        WriteBeginSnapshotRsp begin_snapshot_req = 3;
+        WriteDoneSnapshotRsp done_snapshot_req = 4;
     }
+}
+
+// This message requests data change item
+message WriteDataItemReq {}
+message WriteDataItemRsp {
+    Result result = 1;
+    ChangeItem change_item = 2;
 }
 
 // InitConnectionReq -- is the first connection message that is needed to initiate
 // connection with source database with settings used by user
-message InitConnectionReq {
+message WriteInitConnectionReq {
     string json_settings = 1;
 }
-message InitConnectionRsp {
+message WriteInitConnectionRsp {
     Result result = 1;
 }
 
 // Indicates the begginning of the snapshot progress for table
 // can be used to initiate writing in temporary table, for example
-message BeginWriteSnapshotReq {
+message WriteBeginSnapshotReq {
     Table table = 1;
 }
-message BeginWriteSnapshotRsp {
+message WriteBeginSnapshotRsp {
     Result result = 1;
+    bytes snapshot_state = 2;
 }
 
 // Indicates the ending of the snapshot progress for table
 // Can be used for publishing temporary table, or committing the transaction to make table visible
-message DoneWriteSnapshotReq {
+message WriteDoneSnapshotReq {
     Table table = 1;
+    bytes snapshot_state = 2;
 }
-message DoneWriteSnapshotRsp {
+message WriteDoneSnapshotRsp {
     Result result = 1;
 }
