@@ -9,15 +9,15 @@ message Result {
 
 message SpecReq {}
 // SpecRsp is response of Spec handle that declares setting that endpoint has
-// with the use of AVRO schema
+// with the use of JSON schema
 message SpecRsp {
     Result result = 1;
-    string avro_schema = 2;
+    string json_spec = 2;
 }
 
 message CheckReq {
-    // this JSON should comply to SpecRsp.avro_schema returned by 'Spec' handle
-    string json_spec = 1;
+    // this JSON should comply to SpecRsp.json_spec returned by 'Spec' handle
+    string json_settings = 1;
 }
 message CheckRsp {
     Result result = 1;
@@ -54,6 +54,8 @@ message ColumnData {
         int64 int64 = 2;
         uint32 uint32 = 3;
         uint64 uint64 = 4;
+        float float = 5;
+        double double = 6;
 
         string string = 10;
         bytes binary = 11;

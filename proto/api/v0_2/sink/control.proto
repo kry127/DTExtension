@@ -9,17 +9,28 @@ import "api/v0_2/common.proto";
 // Control item requests for snapshot process
 message WriteControlItemReq {
     oneof control_item_req {
-        BeginWriteSnapshotReq begin_snapshot_req = 1;
-        DoneWriteSnapshotReq done_snapshot_req = 2;
+        InitConnectionReq init_connection_req = 1;
+        BeginWriteSnapshotReq begin_snapshot_req = 2;
+        DoneWriteSnapshotReq done_snapshot_req = 3;
     }
 }
 
 // Control item response for snapshot process
 message WriteControlItemRsp {
     oneof control_item_rsp {
-        BeginWriteSnapshotRsp begin_snapshot_req = 1;
-        DoneWriteSnapshotRsp done_snapshot_req = 2;
+        InitConnectionRsp init_connection_rsp = 1;
+        BeginWriteSnapshotRsp begin_snapshot_req = 2;
+        DoneWriteSnapshotRsp done_snapshot_req = 3;
     }
+}
+
+// InitConnectionReq -- is the first connection message that is needed to initiate
+// connection with source database with settings used by user
+message InitConnectionReq {
+    string json_settings = 1;
+}
+message InitConnectionRsp {
+    Result result = 1;
 }
 
 // Indicates the begginning of the snapshot progress for table

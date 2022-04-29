@@ -19,9 +19,9 @@ service SourceService {
 }
 
 message DiscoverReq {
-    // this JSON should comply to SpecRsp.avro_schema returned by 'Spec' handle
+    // this JSON should comply to SpecRsp.json_spec returned by 'Spec' handle
     // and should be verified by Check rpc handle as compliant
-    string json_spec = 1;
+    string json_settings = 1;
 }
 message DiscoverRsp {
     Result result = 1;

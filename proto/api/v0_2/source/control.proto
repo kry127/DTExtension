@@ -12,23 +12,35 @@ import "api/v0_2/common.proto";
 // Control item requests for snapshot process
 message ReadControlItemReq {
     oneof control_item_req {
-        DataItemReq data_item_req = 1;
-        CursorReq cursor_req = 2;
-        SplitReq split_req = 3;
-        BeginSnapshotReq begin_snapshot_req = 4;
-        DoneSnapshotReq done_snapshot_req = 5;
+        InitConnectionReq init_connection_req = 1;
+        DataItemReq data_item_req = 2;
+        CursorReq cursor_req = 3;
+        SplitReq split_req = 4;
+        BeginSnapshotReq begin_snapshot_req = 5;
+        DoneSnapshotReq done_snapshot_req = 6;
     }
 }
 
 // Control item response for snapshot process
 message ReadControlItemRsp {
     oneof control_item_rsp {
-        DataItemRsp data_item_rsp = 1;
-        CursorRsp cursor_rsp = 2;
-        SplitRsp split_rsp = 3;
-        BeginSnapshotRsp begin_snapshot_rsp = 4;
-        DoneSnapshotRsp done_snapshot_rsp = 5;
+        InitConnectionReq init_connection_req = 1;
+        DataItemRsp data_item_rsp = 2;
+        CursorRsp cursor_rsp = 3;
+        SplitRsp split_rsp = 4;
+        BeginSnapshotRsp begin_snapshot_rsp = 5;
+        DoneSnapshotRsp done_snapshot_rsp = 6;
     }
+}
+
+
+// InitConnectionReq -- is the first connection message that is needed to initiate
+// connection with source database with settings used by user
+message InitConnectionReq {
+    string json_settings = 1;
+}
+message InitConnectionRsp {
+    Result result = 1;
 }
 
 // This message is sent in order to acquire snapshot cursor
@@ -64,12 +76,33 @@ message SplitRsp {
 message BeginSnapshotReq {}
 message BeginSnapshotRsp {
     Result result = 1;
+    // this optional parameter is used to save snapshot state binary representation
+    bytes snapshot_state = 2;
 }
 
 // This message designates a finish of snapshot
 // Resources that might have been allocated during BeginSnapshotReq may be freed now
-message DoneSnapshotReq {}
+message DoneSnapshotReq {
+    bytes snapshot_state = 1;
+}
 message DoneSnapshotRsp {
+    Result result = 1;
+}
+
+
+// when snapshot is reading in concurrent, it is identified by this event.
+// if there is used some state for snapshotting on source that specified in BeginSnapshotRsp,
+// it should appear in snapshot_field in sharding request
+message BeginShardReq {
+    bytes snapshot_state = 1;
+}
+message BeginShardRsp{
+    Result result = 1;
+}
+
+// when snapshotting is over, shard is getting notified about this event, but no resources shoud be freed
+message DoneShardReq {}
+message DoneShardRsp {
     Result result = 1;
 }
 
@@ -107,6 +140,8 @@ message FixLsnReq {}
 message FixLsnRsp {
     Result result = 1;
     ColumnData lsn = 2;
+    // this is an optional field if source have to store some additional info for fixing LSN position
+    bytes replication_state = 3;
 }
 
 // This message queries is LSN is still presented in the stream
@@ -118,7 +153,11 @@ message CheckLsnRsp {
 }
 
 // This message rewinds LSN (e.g. makes it no longer fixed to a certain point)
-message RewindLsnReq {}
+message RewindLsnReq {
+    // the replication state is sequece of bytes returned by `FixLsnReq` and it is needed to free resources allocated
+    // to lock replication position
+    bytes replication_state = 1;
+}
 message RewindLsnRsp {
     Result result = 1;
 }
