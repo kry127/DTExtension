@@ -24,7 +24,7 @@ message ReadControlItemReq {
 // Control item response for snapshot process
 message ReadControlItemRsp {
     oneof control_item_rsp {
-        InitConnectionReq init_connection_req = 1;
+        InitConnectionRsp init_connection_rsp = 1;
         DataItemRsp data_item_rsp = 2;
         CursorRsp cursor_rsp = 3;
         SplitRsp split_rsp = 4;
@@ -36,11 +36,17 @@ message ReadControlItemRsp {
 
 // InitConnectionReq -- is the first connection message that is needed to initiate
 // connection with source database with settings used by user
+// client_id -- when non empty, used to identify client that may perform multiple operations on service.
+// You may ignore this field if you make implementation for single client
 message InitConnectionReq {
     string json_settings = 1;
+    string client_id = 2;
 }
+// client_id -- generated client id, if it was empty in `InitConnectionReq`
+// You may ignore this field if you make implementation for single client
 message InitConnectionRsp {
     Result result = 1;
+    string client_id = 2;
 }
 
 // This message is sent in order to acquire snapshot cursor
@@ -129,7 +135,10 @@ message StreamControlItemRsp {
         CheckLsnRsp check_lsn_rsp = 3;
         RewindLsnReq rewind_lsn_req = 4;
 
-        LostRequestedLsnRsp lost_requested_lsn_rsp = 404;
+        LostRequestedLsnRsp lost_requested_lsn_rsp = 5;
+
+        StartTransactionRsp start_transaction_rsp = 6;
+        StopTransactionRsp stop_transaction_rsp = 7;
     }
 }
 
@@ -165,3 +174,13 @@ message RewindLsnRsp {
 // This message notifies user that requested next item that his LSN
 // has been lost from the log.
 message LostRequestedLsnRsp {}
+
+
+// This message can be returned on DataItemReq and identifies starting the transaction
+message StartTransactionRsp {
+}
+// This message can be returned on DataItemReq and identifies stopping the transaction
+// The messages send by source between StartTransactionRsp and StopTransactionRsp are
+// identified as single transaction
+message StopTransactionRsp {
+}

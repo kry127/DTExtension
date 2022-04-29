@@ -54,6 +54,8 @@ This is simple: you need to implement three handles:
        then C sends `DataItemRsp` in response. And that process repeats over and over again.
     4. When snapshotting is over, F sends `WriteDoneShapshotReq` connection, and if any resources were associated as
        identified by non-empty `snapshot_state` -- they should be freed by connector C.
+    5. In order to delimit transaction, we receive `WriteStartTransactionReq`, and respond with `WriteStartTransactionRsp`,
+       then series of `DataItemReq` with data is a single transaction until we get `WriteStopTransactionReq`.
    
    Note, that depending on the type of the transfer, there could be such scenarios:
     1. Snapshot Only: the whole scenario is written correctly, and in point 4, after receiving `WriteDoneShapshotRsp`,

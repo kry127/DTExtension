@@ -80,7 +80,9 @@ This is simple: you need to implement five handles:
       If it is, C returns `CheckLsnRsp` with OK. But if it is not, `LostRequestedLsnRsp` is returned
    3. Then F usually send `DataItemReq` in order to C send him a series of `DataItemRsp` -- a replication procedure
       which extracts data items. If for some reason during replication th LSN has been lost, the `LostRequestedLsnRsp`
-      will be returned instead of ordinary `DataItemRsp`
+      will be returned instead of ordinary `DataItemRsp`. If connector C would like to identify transaction,
+      `StartTransactionRsp` should be send in response in `DataItemReq`, then streams `DataItemRsp` with data within
+      transaction, and then `StopTransactionRsp` to identify the borders of transaction.
    4. F may send `RewindLsnReq` to reset cursor and free resources. This can happen when transfer stops, for example.
    
 Note, that handles 5 and 6 are duplex communication and maintained by gRPC which utilizes HTTP2 communication protocol.
