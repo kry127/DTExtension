@@ -3,6 +3,7 @@ syntax="proto3";
 package yandexcloud.datatransfer.dtextension.v0_2.source;
 
 import "api/v0_2/common.proto";
+import "api/v0_2/data.proto";
 import "api/v0_2/source/control.proto";
 
 service SourceService {
@@ -46,7 +47,7 @@ message StreamReq {
     // can be null on initialization or when replication begins immediately
     // by the way, in MySQL/MongoDB we can make simple check: if LSN is presented in log, then
     // we have nothing missed. Otherwise, we missed the log position =(
-    ColumnData lsn = 2;
+    ColumnValue lsn = 2;
     StreamControlItemReq control_item_req = 3;
 
     message StreamSource {
@@ -62,6 +63,6 @@ message StreamReq {
 }
 message StreamRsp {
     Result result = 1;
-    ColumnData lsn = 2;
+    ColumnValue lsn = 2;
     StreamControlItemRsp control_item_rsp = 3;
 }
