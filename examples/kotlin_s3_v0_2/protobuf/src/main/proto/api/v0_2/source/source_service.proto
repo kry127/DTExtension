@@ -1,0 +1,68 @@
+syntax="proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2.source;
+
+import "api/v0_2/common.proto";
+import "api/v0_2/data.proto";
+import "api/v0_2/source/control.proto";
+
+service SourceService {
+    // Spec is method for determining endpoint settings available for configuring
+    rpc Spec(SpecReq) returns (SpecRsp) {}
+    // Check is method that checks settings of endpoint are comply to specification
+    // In order to see specification see Spec handle
+    rpc Check(CheckReq) returns (CheckRsp) {}
+    // Method discover is used to fetch available replication objects
+    rpc Discover(DiscoverReq) returns (DiscoverRsp) {}
+
+    rpc Read(stream ReadReq) returns (stream ReadRsp) {}
+    rpc Stream(stream StreamReq) returns (stream StreamRsp) {}
+}
+
+message DiscoverReq {
+    // this JSON should comply to SpecRsp.json_spec returned by 'Spec' handle
+    // and should be verified by Check rpc handle as compliant
+    string json_settings = 1;
+}
+message DiscoverRsp {
+    Result result = 1;
+    repeated Table tables = 2;
+}
+
+message ReadReq {
+    Table table = 1;
+    Cursor cursor = 2;
+    ReadControlItemReq control_item_req = 3;
+
+}
+message ReadRsp {
+    Result result = 1;
+    Cursor cursor = 2;
+    ReadControlItemRsp control_item_rsp = 3;
+}
+
+message StreamReq {
+    StreamSource source = 1;
+    // this is also exclusive (as in data range)
+    // can be null on initialization or when replication begins immediately
+    // by the way, in MySQL/MongoDB we can make simple check: if LSN is presented in log, then
+    // we have nothing missed. Otherwise, we missed the log position =(
+    ColumnValue lsn = 2;
+    StreamControlItemReq control_item_req = 3;
+
+    message StreamSource {
+        oneof source {
+            Table table = 1;
+            Namespace namespace = 2;
+            Cluster cluster = 3;
+        }
+
+        // this means it contains all namespaces -- all possible messages are replicated
+        message Cluster {}
+    }
+}
+message StreamRsp {
+    Result result = 1;
+    ColumnValue lsn = 2;
+    StreamControlItemRsp control_item_rsp = 3;
+}
