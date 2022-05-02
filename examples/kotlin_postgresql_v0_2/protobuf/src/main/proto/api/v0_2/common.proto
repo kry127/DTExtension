@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2;
+
+import "api/v0_2/data.proto";
+
+message Result {
+    bool ok = 1;
+    string error = 2;
+}
+
+message SpecReq {}
+// SpecRsp is response of Spec handle that declares setting that endpoint has
+// with the use of JSON schema
+message SpecRsp {
+    Result result = 1;
+    string json_spec = 2;
+}
+
+message CheckReq {
+    // this JSON should comply to SpecRsp.json_spec returned by 'Spec' handle
+    string json_settings = 1;
+}
+message CheckRsp {
+    Result result = 1;
+}
+
+// this message represents an interval in form [from; to]
+// each of begin or end of the interval can be excluded with
+// "exclude_from" and "exclude_to" flags
+message DataRange {
+    // absence of 'from' field means -oo
+    ColumnValue from = 1;
+    // absence of 'to' field means +oo
+    ColumnValue to = 2;
+    // explicit setting "exclude_from" to true when "descending == false" in `ColumnCursor` should be done,
+    // if column of the data range is itself primary key, not the part of some compound primary key or unique index.
+    // Thus, you can make exactly once semantics, where 'from' meaning last committed message by the client
+    bool exclude_from = 3;
+    // explicit setting "exclude_to" to true when "descending == true" in `ColumnCursor`  should be done,
+    // if column of the data range is itself primary key, not the part of some compound primary key or unique index.
+    // Thus, you can make exactly once semantics, where 'to' meaning last committed message by the client
+    bool exclude_to = 4;
+}
+
+message ColumnCursor {
+    Column column = 1;
+    DataRange data_range = 2;
+    // the default upload behaviour is increasing. Specify this in order to change behaviour
+    bool descending = 3;
+}
+
+// note, that there is difference from DataRange, because
+// one can easily do arithmetics on this datatype:
+//    [from; to] -> [from; m] U [m + 1; to]
+message LineCursor {
+    uint64 from_inclusive = 1;
+    uint64 to_inclusive = 2;
+}
+
+message Cursor {
+    oneof cursor {
+        ColumnCursor column_cursor = 1;
+        LineCursor line_cursor = 2;
+    }
+}

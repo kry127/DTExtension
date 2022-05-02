@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft/2019-09/schema",
+  "$id": "http://kry127.ru/kotlin_postgresql.json",
+  "title": "PostgreSQL config parameters",
+  "type": "object",
+  "default": {},
+  "required": [
+    "pg_jdbc_connection_string"
+  ],
+  "properties": {
+    "pg_jdbc_connection_string": {
+      "title": "PostgreSQL connection string",
+      "type": "string",
+      "default": "",
+      "examples": [
+        " postgres://user:secret@localhost:5432/mydatabasename"
+      ]
+    },
+  },
+  "examples": [{
+    "pg_jdbc_connection_string": " postgres://user:secret@localhost:5432/mydatabasename"
+  }]
+}
