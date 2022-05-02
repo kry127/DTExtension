@@ -7,7 +7,6 @@ syntax = "proto3";
 
 package yandexcloud.datatransfer.dtextension.v0_2.source;
 
-import "api/v0_2/common.proto";
 import "api/v0_2/data.proto";
 
 // Control item requests for snapshot process
@@ -70,69 +69,65 @@ message DoneSnapshotReq {
 message DoneSnapshotRsp {}
 
 
-// when snapshot is reading in concurrent, it is identified by this event.
-// if there is used some state for snapshotting on source that specified in BeginSnapshotRsp,
-// it should appear in snapshot_field in sharding request
-message BeginShardReq {
-    bytes snapshot_state = 1;
-}
-message BeginShardRsp{
-    Result result = 1;
-}
-
-// when snapshotting is over, shard is getting notified about this event, but no resources shoud be freed
-message DoneShardReq {}
-message DoneShardRsp {
-    Result result = 1;
-}
-
 // This message requests data change item
 message DataItemReq {}
 message DataItemRsp {
-    ChangeItem change_item = 2;
+    ChangeItem change_item = 1;
 }
 
 message StreamControlItemReq {
     oneof control_item_req {
-        DataItemReq data_item_req = 1;
+        InitConnectionReq init_connection_req = 1;
         FixLsnReq fix_lsn_req = 2;
         CheckLsnReq check_lsn_req = 3;
-        RewindLsnReq rewind_lsn_req = 4;
+        DataItemReq data_item_req = 4;
+        RewindLsnReq rewind_lsn_req = 5;
     }
 }
 
 message StreamControlItemRsp {
     oneof control_item_rsp {
-        DataItemRsp data_item_rsp = 1;
+        InitConnectionRsp init_connection_rsp = 1;
         FixLsnRsp fix_lsn_rsp = 2;
         CheckLsnRsp check_lsn_rsp = 3;
-        RewindLsnReq rewind_lsn_req = 4;
+        DataItemRsp data_item_rsp = 4;
+        RewindLsnReq rewind_lsn_req = 5;
 
-        LostRequestedLsnRsp lost_requested_lsn_rsp = 5;
+        LostRequestedLsnRsp lost_requested_lsn_rsp = 6;
 
-        StartTransactionRsp start_transaction_rsp = 6;
-        StopTransactionRsp stop_transaction_rsp = 7;
+        StartTransactionRsp start_transaction_rsp = 7;
+        StopTransactionRsp stop_transaction_rsp = 8;
     }
 }
 
-// This message requests to fix current LSN.
+// This message requests to fix current LSN for specified replication source
 // The returned message is user LSN that designate where stream will be read from
 // After this message, each further read of item moves LSN forward
-message FixLsnReq {}
+message FixLsnReq {
+    StreamSource stream_source = 1;
+
+    message StreamSource {
+        oneof source {
+            Table table = 1;
+            Namespace namespace = 2;
+            Cluster cluster = 3;
+        }
+
+        // this means it contains all namespaces -- all possible messages are replicated
+        message Cluster {}
+    }
+}
 message FixLsnRsp {
-    Result result = 1;
-    ColumnValue lsn = 2;
     // this is an optional field if source have to store some additional info for fixing LSN position
     bytes replication_state = 3;
 }
 
 // This message queries is LSN is still presented in the stream
+// If LSN lost, LostRequestedLsnRsp should be returned
 message CheckLsnReq {
     ColumnValue lsn = 1;
 }
-message CheckLsnRsp {
-    Result result = 1;
-}
+message CheckLsnRsp {}
 
 // This message rewinds LSN (e.g. makes it no longer fixed to a certain point)
 message RewindLsnReq {
@@ -140,9 +135,7 @@ message RewindLsnReq {
     // to lock replication position
     bytes replication_state = 1;
 }
-message RewindLsnRsp {
-    Result result = 1;
-}
+message RewindLsnRsp {}
 
 // This message notifies user that requested next item that his LSN
 // has been lost from the log.
@@ -150,10 +143,8 @@ message LostRequestedLsnRsp {}
 
 
 // This message can be returned on DataItemReq and identifies starting the transaction
-message StartTransactionRsp {
-}
+message StartTransactionRsp {}
 // This message can be returned on DataItemReq and identifies stopping the transaction
 // The messages send by source between StartTransactionRsp and StopTransactionRsp are
 // identified as single transaction
-message StopTransactionRsp {
-}
+message StopTransactionRsp {}

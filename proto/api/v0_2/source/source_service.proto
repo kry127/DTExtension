@@ -42,24 +42,12 @@ message ReadRsp {
 }
 
 message StreamReq {
-    StreamSource source = 1;
     // this is also exclusive (as in data range)
     // can be null on initialization or when replication begins immediately
     // by the way, in MySQL/MongoDB we can make simple check: if LSN is presented in log, then
     // we have nothing missed. Otherwise, we missed the log position =(
     ColumnValue lsn = 2;
     StreamControlItemReq control_item_req = 3;
-
-    message StreamSource {
-        oneof source {
-            Table table = 1;
-            Namespace namespace = 2;
-            Cluster cluster = 3;
-        }
-
-        // this means it contains all namespaces -- all possible messages are replicated
-        message Cluster {}
-    }
 }
 message StreamRsp {
     Result result = 1;

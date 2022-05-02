@@ -43,7 +43,7 @@ enum OpType {
 message ChangeItem {
     oneof change_item {
         DataChangeItem data_change_item = 1;
-        HomoChangeItem ddl_change_item = 2;
+        HomoChangeItem homo_change_item = 2;
     }
 }
 
