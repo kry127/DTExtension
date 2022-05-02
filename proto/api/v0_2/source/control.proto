@@ -16,9 +16,8 @@ message ReadControlItemReq {
         InitConnectionReq init_connection_req = 1;
         DataItemReq data_item_req = 2;
         CursorReq cursor_req = 3;
-        SplitReq split_req = 4;
-        BeginSnapshotReq begin_snapshot_req = 5;
-        DoneSnapshotReq done_snapshot_req = 6;
+        BeginSnapshotReq begin_snapshot_req = 4;
+        DoneSnapshotReq done_snapshot_req = 5;
     }
 }
 
@@ -28,9 +27,8 @@ message ReadControlItemRsp {
         InitConnectionRsp init_connection_rsp = 1;
         DataItemRsp data_item_rsp = 2;
         CursorRsp cursor_rsp = 3;
-        SplitRsp split_rsp = 4;
-        BeginSnapshotRsp begin_snapshot_rsp = 5;
-        DoneSnapshotRsp done_snapshot_rsp = 6;
+        BeginSnapshotRsp begin_snapshot_rsp = 4;
+        DoneSnapshotRsp done_snapshot_rsp = 5;
     }
 }
 
@@ -56,25 +54,6 @@ message CursorReq {}
 message CursorRsp {
     Result result = 1;
     Cursor cursor = 2;
-}
-
-// This message is send when data agent that uses the API cannot
-// split uploading range on parts. This may be caused because of the
-// unknown type of database column. So when receiving this message
-// you should perform split of the data range on parts
-message SplitReq {
-    DataRange data_range = 1;
-}
-// Number of resulting parts are not reglamented right now, but
-// simple split by two equal parts is recommended default action.
-// Word 'equal' is a bit tricky, because it is recommended to
-// spread the lines of data equally by two parts and it depends,
-// for example, from the distribution of values in the column.
-// But since distribution of data is unknown in general case,
-// split by midpoint is OK.
-message SplitRsp {
-    Result result = 1;
-    repeated DataRange data_range = 2;
 }
 
 // This message designates snapshot beginning

@@ -91,7 +91,6 @@ enum ColumnType {
     COLUMN_TYPE_ISO_TIME = 13;
     COLUMN_TYPE_STRING = 14;
     COLUMN_TYPE_BINARY = 15;
-
 }
 
 message Decimal {
