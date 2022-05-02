@@ -44,24 +44,20 @@ message InitConnectionReq {
 // client_id -- generated client id, if it was empty in `InitConnectionReq`
 // You may ignore this field if you make implementation for single client
 message InitConnectionRsp {
-    Result result = 1;
     string client_id = 2;
 }
 
 // This message is sent in order to acquire snapshot cursor
 // that will iterate through snapshotting values
+// note, that cursor value will be stored in general response
 message CursorReq {}
-message CursorRsp {
-    Result result = 1;
-    Cursor cursor = 2;
-}
+message CursorRsp {}
 
 // This message designates snapshot beginning
 // When this message comes, source connector should designate bounds
 // of transferring lines, or take read snapshot lock for consistency
 message BeginSnapshotReq {}
 message BeginSnapshotRsp {
-    Result result = 1;
     // this optional parameter is used to save snapshot state binary representation
     bytes snapshot_state = 2;
 }
@@ -71,9 +67,7 @@ message BeginSnapshotRsp {
 message DoneSnapshotReq {
     bytes snapshot_state = 1;
 }
-message DoneSnapshotRsp {
-    Result result = 1;
-}
+message DoneSnapshotRsp {}
 
 
 // when snapshot is reading in concurrent, it is identified by this event.
