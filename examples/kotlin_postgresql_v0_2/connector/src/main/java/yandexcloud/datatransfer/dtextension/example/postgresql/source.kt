@@ -1,4 +1,4 @@
-package yandexcloud.datatransfer.dtextension.example.s3
+package yandexcloud.datatransfer.dtextension.example.postgresql
 
 import com.beust.klaxon.Klaxon
 import com.google.protobuf.ByteString
@@ -17,7 +17,6 @@ import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceGrpcKt
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.ReadRsp
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.StreamRsp
-import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.sql.Connection
 import java.sql.DriverManager
