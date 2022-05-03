@@ -59,7 +59,7 @@ message DataChangeItem {
     Schema schema = 1;
     OpType op_type = 2;
     oneof format {
-        PlainRow data = 11;
+        PlainRow plain_row = 11;
         Parquet parquet = 12;
     }
 }

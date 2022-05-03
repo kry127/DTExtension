@@ -9,11 +9,18 @@ package yandexcloud.datatransfer.dtextension.v0_2.source;
 
 import "api/v0_2/data.proto";
 
+// There are two types of control items:
+//  1. ReadControlItemReq/ReadControlItemRsp -- control items for Read protocol
+//  2. StreamControlItemReq/StreamControlItemRsp -- control items for Stream protocol
+// Most commonly, there is such system of interaction: client sends "<Type>Req" message,
+// and server responds with single "<Type>Rsp" message.
+// The only exception is ChangeStreamReq -- this single request produces multibple ChangeStreamRsp.
+
 // Control item requests for snapshot process
 message ReadControlItemReq {
     oneof control_item_req {
         InitConnectionReq init_connection_req = 1;
-        DataItemReq data_item_req = 2;
+        ChangeStreamReq change_stream_req = 2;
         CursorReq cursor_req = 3;
         BeginSnapshotReq begin_snapshot_req = 4;
         DoneSnapshotReq done_snapshot_req = 5;
@@ -24,11 +31,56 @@ message ReadControlItemReq {
 message ReadControlItemRsp {
     oneof control_item_rsp {
         InitConnectionRsp init_connection_rsp = 1;
-        DataItemRsp data_item_rsp = 2;
+        ChangeStreamRsp change_stream_rsp = 2;
         CursorRsp cursor_rsp = 3;
         BeginSnapshotRsp begin_snapshot_rsp = 4;
         DoneSnapshotRsp done_snapshot_rsp = 5;
     }
+}
+
+message StreamControlItemReq {
+    oneof control_item_req {
+        InitConnectionReq init_connection_req = 1;
+        FixLsnReq fix_lsn_req = 2;
+        CheckLsnReq check_lsn_req = 3;
+        ChangeStreamReq change_stream_req = 4;
+        RewindLsnReq rewind_lsn_req = 5;
+    }
+}
+
+message StreamControlItemRsp {
+    oneof control_item_rsp {
+        InitConnectionRsp init_connection_rsp = 1;
+        FixLsnRsp fix_lsn_rsp = 2;
+        CheckLsnRsp check_lsn_rsp = 3;
+        ChangeStreamRsp change_stream_rsp = 4;
+        RewindLsnReq rewind_lsn_req = 5;
+
+        LostRequestedLsnRsp lost_requested_lsn_rsp = 6;
+    }
+}
+
+// This message requests stream of data change item
+// and it is used as control item for both Read and Stream control sequences
+message ChangeStreamReq {}
+// After receiving ChangeStreamReq, server should produce series of ChangeStreamRsp containing data in change_item
+// field. When sequence of ChangeStreamRsp ends from server side, server should send last ChangeStreamRsp message
+// with "end_of_stream" message. The client should wait until this message until further actions.
+message ChangeStreamRsp {
+    oneof change_stream_item {
+        ChangeItem change_item = 1;
+        StartTransaction start_transaction = 2;
+        StopTransaction stop_transaction = 3;
+        EndOfStream end_of_stream = 4;
+    }
+
+    // This message identifies starting of the transaction, useful in Stream sources
+    message StartTransaction {}
+    // This message identifies stopping the transaction
+    // The messages of variant type change_item in ChangeStreamRsp between StartTransactionRsp and StopTransactionRsp
+    // are identified as single transaction
+    message StopTransaction {}
+    message EndOfStream {}
 }
 
 
@@ -72,37 +124,6 @@ message DoneSnapshotReq {
 message DoneSnapshotRsp {}
 
 
-// This message requests data change item
-message DataItemReq {}
-message DataItemRsp {
-    ChangeItem change_item = 1;
-}
-
-message StreamControlItemReq {
-    oneof control_item_req {
-        InitConnectionReq init_connection_req = 1;
-        FixLsnReq fix_lsn_req = 2;
-        CheckLsnReq check_lsn_req = 3;
-        DataItemReq data_item_req = 4;
-        RewindLsnReq rewind_lsn_req = 5;
-    }
-}
-
-message StreamControlItemRsp {
-    oneof control_item_rsp {
-        InitConnectionRsp init_connection_rsp = 1;
-        FixLsnRsp fix_lsn_rsp = 2;
-        CheckLsnRsp check_lsn_rsp = 3;
-        DataItemRsp data_item_rsp = 4;
-        RewindLsnReq rewind_lsn_req = 5;
-
-        LostRequestedLsnRsp lost_requested_lsn_rsp = 6;
-
-        StartTransactionRsp start_transaction_rsp = 7;
-        StopTransactionRsp stop_transaction_rsp = 8;
-    }
-}
-
 // This message requests to fix current LSN for specified replication source
 // The returned message is user LSN that designate where stream will be read from
 // After this message, each further read of item moves LSN forward
@@ -143,11 +164,3 @@ message RewindLsnRsp {}
 // This message notifies user that requested next item that his LSN
 // has been lost from the log.
 message LostRequestedLsnRsp {}
-
-
-// This message can be returned on DataItemReq and identifies starting the transaction
-message StartTransactionRsp {}
-// This message can be returned on DataItemReq and identifies stopping the transaction
-// The messages send by source between StartTransactionRsp and StopTransactionRsp are
-// identified as single transaction
-message StopTransactionRsp {}

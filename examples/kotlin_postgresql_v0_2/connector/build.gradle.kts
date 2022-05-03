@@ -22,7 +22,7 @@ dependencies {
     implementation(project(":protobuf"))
 
     // connector-specific
-    implementation("org.postgresql:postgresql:42.3.1")
+    implementation("org.postgresql:postgresql:42.3.4")
 
     testImplementation("junit", "junit", "4.12")
 }
