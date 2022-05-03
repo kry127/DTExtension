@@ -649,6 +649,26 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     override fun stream(requests: Flow<SourceServiceOuterClass.StreamReq>): Flow<SourceServiceOuterClass.StreamRsp> {
-        return super.stream(requests)
+        fun mkBadRsp(cursor: ColumnValue, error: String): SourceServiceOuterClass.StreamRsp =
+            SourceServiceOuterClass.StreamRsp.newBuilder().setLsn(cursor).setResult(RspUtil.resultError(error)).build()
+
+        return flow {
+            requests.collect { req ->
+                val lsn = req.lsn
+                try {
+                    when (req.controlItemReq?.controlItemReqCase) {
+                        Control.StreamControlItemReq.ControlItemReqCase.INIT_CONNECTION_REQ -> TODO()
+                        Control.StreamControlItemReq.ControlItemReqCase.FIX_LSN_REQ -> TODO()
+                        Control.StreamControlItemReq.ControlItemReqCase.CHECK_LSN_REQ -> TODO()
+                        Control.StreamControlItemReq.ControlItemReqCase.DATA_ITEM_REQ -> TODO()
+                        Control.StreamControlItemReq.ControlItemReqCase.REWIND_LSN_REQ -> TODO()
+                        null, Control.StreamControlItemReq.ControlItemReqCase.CONTROLITEMREQ_NOT_SET ->
+                            emit(mkBadRsp(cursor, "no control item response"))
+                    }
+                } catch (e: java.lang.Exception) {
+                    emit(mkBadRsp(lsn, "exception occured: ${e.message}"))
+                }
+            }
+        }
     }
 }
