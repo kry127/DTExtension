@@ -27,6 +27,7 @@ import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
+import java.util.*
 
 val connector_id = "kry127.postgresql_example"
 
@@ -57,7 +58,8 @@ object PsqlQueries {
             return Data.ColumnType.COLUMN_TYPE_BINARY
         }
         when (pgType) {
-            "timestamp without time zone", "timestamp with time zone", "time without time zone", "time with time zone", "date", "data" -> return Data.ColumnType.COLUMN_TYPE_ISO_TIME
+            "timestamp without time zone", "timestamp with time zone", "time without time zone", "time with time zone", "date" ->
+                return Data.ColumnType.COLUMN_TYPE_ISO_TIME
             "uuid", "name", "text", "interval", "char", "abstime", "money"
             -> return Data.ColumnType.COLUMN_TYPE_STRING
             "boolean" -> return Data.ColumnType.COLUMN_TYPE_BOOL
@@ -506,9 +508,12 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             ReadRsp.newBuilder().setCursor(cursor).setResult(RspUtil.resultError(error)).build()
 
         return flow {
-            // INFO: this is the only stateful resource per-gRPC call: connection to database.
+            // INFO: this is the only stateful resources per-gRPC call: connection to database and client ID
             // It is initialized when INIT_CONNECTION_REQ message with full endpoint specification comes
-            lateinit var connection: Connection;
+            lateinit var connection: Connection
+            // note, that you can use clientId to persist resources in database for particular client,
+            // or if you write completely stateless connector, you may ignore clientId at all
+            lateinit var clientId: String
 
             requests.collect { req ->
                 val table = req.table
@@ -525,10 +530,11 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // that established connection with service in order to
                             // service be able to establish connection with database
                             val initConnReq = req.controlItemReq.initConnectionReq
+                            clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles
                             this@PostgreSQL.ValidateSpec(initConnReq.jsonSettings)
                             connection = this@PostgreSQL.ConnectToPostgreSQL(initConnReq.jsonSettings)
-                            emit(mkRsp(cursor, InitConnectionRsp.getDefaultInstance()))
+                            emit(mkRsp(cursor, InitConnectionRsp.newBuilder().setClientId(clientId).build()))
                         }
                         Control.ReadControlItemReq.ControlItemReqCase.CURSOR_REQ -> {
                             // STEP 2: then client should know, how to request ranges of data,
@@ -539,23 +545,25 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // minimum value of interval is excluded and interpreted as last
                             // commited
                             // and selection of pieces is happened as select statement
+                            val cursorReq = req.controlItemReq.cursorReq
                             val schema = this@PostgreSQL.SchemaQuery(connection, namespace, name)
 
+                            val colName = cursorReq.preferredColumn
                             val keyCount = schema.columnsList.count { it.key }
-                            for (col in schema.columnsList) {
-                                if (col.key) {
-                                    val newCursor = GetAscendingCursor(
-                                        connection,
-                                        namespace,
-                                        name,
-                                        col,
-                                        // if this column is a single key: exclude lower bound of cursor
-                                        keyCount == 1
-                                    )
-                                    emit(mkRsp(newCursor, CursorRsp.getDefaultInstance()))
-                                    break
-                                }
-                            }
+                            val col =
+                                   schema.columnsList.find { it.name == colName && colName != "" }
+                                ?: schema.columnsList.find { it.key }
+                                ?: throw DtExtensionException("Neither key, nor specified column was found")
+
+                            val newCursor = GetAscendingCursor(
+                                connection,
+                                namespace,
+                                name,
+                                col,
+                                // if this column is a single key: safely exclude lower bound of cursor
+                                keyCount == 1
+                            )
+                            emit(mkRsp(newCursor, CursorRsp.getDefaultInstance()))
                         }
                         Control.ReadControlItemReq.ControlItemReqCase.BEGIN_SNAPSHOT_REQ -> {
                             // STEP 3: this is just a notification when uploading of the table is starting
