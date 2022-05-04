@@ -8,11 +8,13 @@ import net.pwall.json.schema.JSONSchema
 import org.postgresql.PGConnection
 import org.postgresql.replication.LogSequenceNumber
 import org.postgresql.replication.PGReplicationStream
+import yandexcloud.datatransfer.dtextension.v0_2.ColumnCursorKt
 import yandexcloud.datatransfer.dtextension.v0_2.Common
 import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
 import yandexcloud.datatransfer.dtextension.v0_2.Data.*
 import yandexcloud.datatransfer.dtextension.v0_2.source.Control.*
+import yandexcloud.datatransfer.dtextension.v0_2.source.Control.StreamChangeRsp.EndOfStream
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceGrpcKt
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.ReadRsp
@@ -352,28 +354,49 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             .build()
     }
 
-    private fun deltaTableQuery(
-        cursor: Cursor, namespace: String, name: String,
-        schema: Schema, limit: Int
-    ): String {
-        val colCursor = cursor.columnCursor ?: throw DtExtensionException("Only column cursor is supported")
-        val columnList = schema.columnsList.joinToString { "\"${it.name}\"" }
-        val leftWhere = colCursor.dataRange.from?.let {
+    private fun extractMaxColumnInWindow(
+        cursor: ColumnCursor, namespace: String, name: String, window: Int) : String{
+        val whereClause = cursor.dataRange.from?.let {
             if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
                 ""
-            } else if (colCursor.dataRange.excludeFrom) {
-                "AND \"${colCursor.column.name}\" > ${columnValueAsSqlString(it)}"
+            } else if (cursor.dataRange.excludeFrom) {
+                "\"${cursor.column.name}\" > ${columnValueAsSqlString(it)}"
             } else {
-                "AND \"${colCursor.column.name}\" >= ${columnValueAsSqlString(it)}"
+                "\"${cursor.column.name}\" >= ${columnValueAsSqlString(it)}"
+            }
+        }
+        return """
+            SELECT max("${cursor.column.name}")
+            FROM (
+              SELECT "${cursor.column.name}"
+              FROM "$namespace"."$name"
+              WHERE $whereClause
+              LIMIT $window
+            ) as sq;
+            """
+    }
+
+    private fun deltaTableQuery(
+        cursor: ColumnCursor, namespace: String, name: String,
+        schema: Schema
+    ): String {
+        val columnList = schema.columnsList.joinToString { "\"${it.name}\"" }
+        val leftWhere = cursor.dataRange.from?.let {
+            if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
+                ""
+            } else if (cursor.dataRange.excludeFrom) {
+                "AND \"${cursor.column.name}\" > ${columnValueAsSqlString(it)}"
+            } else {
+                "AND \"${cursor.column.name}\" >= ${columnValueAsSqlString(it)}"
             }
         } ?: ""
-        val rightWhere = colCursor.dataRange.to?.let {
+        val rightWhere = cursor.dataRange.to?.let {
             if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
                 ""
-            }else if (colCursor.dataRange.excludeTo) {
-                "AND \"${colCursor.column.name}\" < ${columnValueAsSqlString(it)}"
+            }else if (cursor.dataRange.excludeTo) {
+                "AND \"${cursor.column.name}\" < ${columnValueAsSqlString(it)}"
             } else {
-                "AND \"${colCursor.column.name}\" <= ${columnValueAsSqlString(it)}"
+                "AND \"${cursor.column.name}\" <= ${columnValueAsSqlString(it)}"
             }
         } ?: ""
         val query = """
@@ -382,12 +405,11 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             WHERE 1=1
             $leftWhere
             $rightWhere
-            ORDER BY ${colCursor.column.name} ${
-            if (colCursor.descending) {
+            ORDER BY ${cursor.column.name} ${
+            if (cursor.descending) {
                 "desc"
             } else ""
         }
-            LIMIT $limit
             """
         return query
     }
@@ -499,11 +521,28 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     // TODO make analogue with parquet
+    // returns delta with desired window size and
+    // maximum cursor
     private fun getTableDeltaAsPlainRow(
         connection: Connection, cursor: Cursor, namespace: String, name: String,
-        schema: Schema, limit: Int
-    ): List<PlainRow> {
-        val query = deltaTableQuery(cursor, namespace, name, schema, limit)
+        schema: Schema, window: Int
+    ): Pair<List<PlainRow>, ColumnValue> {
+        val columnCursor = cursor.columnCursor
+            ?: throw DtExtensionException("Only column cursor is supported in connector")
+
+        // cursor is defined as [a, b]. We need to find c as maximum of column value of
+        // desired window size
+        val maxWindowQuery = extractMaxColumnInWindow(columnCursor, namespace, name, window)
+        val maxWindowStmt = connection.prepareStatement(maxWindowQuery)
+        val maxWindowResult = maxWindowStmt.executeQuery()
+        val maxColumnValue = getColumnValue(maxWindowResult, 1, columnCursor.column.type)
+
+        // we calculated c, the next step is to guarantee, that whole interval [a, c] will be transfered
+        val deltaCursor = columnCursor.toBuilder().setDataRange(
+                columnCursor.dataRange.toBuilder().setTo(maxColumnValue).setExcludeTo(false)
+            ).build()
+
+        val query = deltaTableQuery(deltaCursor, namespace, name, schema)
         val stmt = connection.prepareStatement(query)
         val result = stmt.executeQuery()
 
@@ -517,7 +556,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             changeItemList.add(rowBuilder.build())
         }
         result.close()
-        return changeItemList
+        return Pair(changeItemList, maxColumnValue)
     }
 
     override suspend fun spec(request: Common.SpecReq): Common.SpecRsp {
@@ -584,25 +623,24 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     override fun read(requests: Flow<SourceServiceOuterClass.ReadReq>): Flow<ReadRsp> {
-        fun mkRsp(cursor: Cursor, controlItem: Any): ReadRsp {
-            val readControlItemBuilder = ReadControlItemRsp.newBuilder()
+        fun mkRsp(controlItem: Any): ReadRsp {
+            val readCtlRsp = ReadCtlRsp.newBuilder()
             when (controlItem) {
-                is InitConnectionRsp -> readControlItemBuilder.initConnectionRsp = controlItem
-                is CursorRsp -> readControlItemBuilder.cursorRsp = controlItem
-                is BeginSnapshotRsp -> readControlItemBuilder.beginSnapshotRsp = controlItem
-                is ChangeStreamRsp -> readControlItemBuilder.changeStreamRsp = controlItem
-                is DoneSnapshotRsp -> readControlItemBuilder.doneSnapshotRsp = controlItem
+                is InitRsp -> readCtlRsp.initRsp = controlItem
+                is CursorRsp -> readCtlRsp.cursorRsp = controlItem
+                is BeginSnapshotRsp -> readCtlRsp.beginSnapshotRsp = controlItem
+                is ReadChangeRsp -> readCtlRsp.readChangeRsp = controlItem
+                is DoneSnapshotRsp -> readCtlRsp.doneSnapshotRsp = controlItem
                 else -> throw IllegalArgumentException("Unknown control item type: ${controlItem.javaClass}")
             }
             return ReadRsp.newBuilder()
                 .setResult(RspUtil.resultOk)
-                .setCursor(cursor)
-                .setControlItemRsp(readControlItemBuilder.build())
+                .setReadCtlRsp(readCtlRsp)
                 .build()
         }
 
-        fun mkBadRsp(cursor: Cursor, error: String): ReadRsp =
-            ReadRsp.newBuilder().setCursor(cursor).setResult(RspUtil.resultError(error)).build()
+        fun mkBadRsp(error: String): ReadRsp =
+            ReadRsp.newBuilder().setResult(RspUtil.resultError(error)).build()
 
         return flow {
             // INFO: this is the only stateful resources per-gRPC call: connection to database and client ID
@@ -616,24 +654,23 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 val table = req.table
                 val namespace = table.namespace.namespace
                 val name = table.name
-                val cursor = req.cursor
                 try {
-                    when (req.controlItemReq?.controlItemReqCase) {
-                        ReadControlItemReq.ControlItemReqCase.INIT_CONNECTION_REQ -> {
+                    when (req.readCtlReq?.ctlReqCase) {
+                        ReadCtlReq.CtlReqCase.INIT_REQ -> {
                             // STEP 1: this branch should initialize connection with database
                             // THIS STAGE IS NEVER SKIPPED BY CLIENT AFTER EACH gRPC REQUEST!
                             //
                             // This is the first control message that should be sent by client
                             // that established connection with service in order to
                             // service be able to establish connection with database
-                            val initConnReq = req.controlItemReq.initConnectionReq
+                            val initConnReq = req.readCtlReq.initReq
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
                             this@PostgreSQL.ValidateSpec(initConnReq.jsonSettings)
                             connection = this@PostgreSQL.connectToPostgreSQL(initConnReq.jsonSettings)
-                            emit(mkRsp(cursor, InitConnectionRsp.newBuilder().setClientId(clientId).build()))
+                            emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
-                        ReadControlItemReq.ControlItemReqCase.CURSOR_REQ -> {
+                        ReadCtlReq.CtlReqCase.CURSOR_REQ -> {
                             // STEP 2: then client should know, how to request ranges of data,
                             // that's why you should provide him cursor
                             // NOTE: client can skip this message after reconnect if it already has some cursor
@@ -642,7 +679,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // minimum value of interval is excluded and interpreted as last
                             // commited
                             // and selection of pieces is happened as select statement
-                            val cursorReq = req.controlItemReq.cursorReq
+                            val cursorReq = req.readCtlReq.cursorReq
                             val schema = this@PostgreSQL.schemaQuery(connection, namespace, name)
 
                             val colName = cursorReq.preferredColumn
@@ -663,9 +700,9 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 // if this column is a single key: safely exclude lower bound of cursor
                                 keyCount == 1
                             )
-                            emit(mkRsp(newCursor, CursorRsp.getDefaultInstance()))
+                            emit(mkRsp(CursorRsp.newBuilder().setCursor(newCursor).build()))
                         }
-                        ReadControlItemReq.ControlItemReqCase.BEGIN_SNAPSHOT_REQ -> {
+                        ReadCtlReq.CtlReqCase.BEGIN_SNAPSHOT_REQ -> {
                             // STEP 3: this is just a notification when uploading of the table is starting
                             // NOTE: client can skip this step if it already began to upload table, but reconnection happened
                             val state = "Hello, world!"
@@ -675,18 +712,24 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                     // you may set here additional state that will be restored on DONE_SNAPSHOT_REQ
                                     .setSnapshotState(ByteString.copyFromUtf8(state))
                                     .build()
-                            emit(mkRsp(cursor, controlItem))
+                            emit(mkRsp(controlItem))
                         }
-                        ReadControlItemReq.ControlItemReqCase.CHANGE_STREAM_REQ -> {
+                        ReadCtlReq.CtlReqCase.READ_CHANGE_REQ -> {
                             // STEP 4: the main routine
                             // Client would like to request corresponding lines for table
                             //
-                            // Note, that you may emit here more than one data change item:
+                            // Note that you should emit multiple messages until cursor change,
+                            // otherwise you will be requested the same data range again.
+                            //
+                            // Also note, that you may emit here more than one data change item:
                             // that is increase efficiency of using network. For example, you may
                             // transmit 1000 items back to client. You can also pack your change
                             // items in parquet format to be even more efficient
+                            val readChangeReq = req.readCtlReq.readChangeReq
+                            val cursor = readChangeReq.cursor
                             val schema = this@PostgreSQL.schemaQuery(connection, namespace, name)
-                            val changeItems = this@PostgreSQL.getTableDeltaAsPlainRow(
+                            // TODO rework delta extraction for cursor commitment
+                            val (changeItems, maxColumn) = this@PostgreSQL.getTableDeltaAsPlainRow(
                                 connection, cursor, namespace, name, schema, 1000
                             )
                             val columnCursor = cursor.columnCursor
@@ -695,10 +738,10 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val colCursorId = schema.columnsList.indexOfFirst { it.name == columnCursor.column.name }
                             if (colCursorId == -1) throw DtExtensionException("Column cursor not found in schema")
 
-                            var endCursor: Cursor = cursor
                             changeItems.forEach {
+                                // emit change items
                                 val controlItem =
-                                    ChangeStreamRsp.newBuilder().setChangeItem(
+                                    ReadChangeRsp.newBuilder().setChangeItem(
                                         ChangeItem.newBuilder().setDataChangeItem(
                                             DataChangeItem.newBuilder()
                                                 .setSchema(schema)
@@ -707,53 +750,43 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                         )
                                     )
                                     .build()
-                                val cursorKey = controlItem.changeItem.dataChangeItem.plainRow.getValues(colCursorId)
-                                val newDataRange = Common.DataRange.newBuilder(columnCursor.dataRange)
-                                    .let {
-                                        if (columnCursor.descending) {
-                                            it.setTo(cursorKey)
-                                        } else {
-                                            it.setFrom(cursorKey)
-                                        }
-                                    }
-                                    .build()
-                                val newCursor = Cursor.newBuilder(cursor)
-                                    .setColumnCursor(
-                                        ColumnCursor.newBuilder(columnCursor)
-                                            .setDataRange(newDataRange)
-                                            .build()
-                                    )
-                                    .build()
-                                endCursor = newCursor
-                                emit(mkRsp(newCursor, controlItem))
+                                emit(mkRsp(controlItem))
                             }
-                            // demarcate your end
+                            // demarcate your end: respond with new data range still not transferred
                             emit(
                                 mkRsp(
-                                    endCursor, ChangeStreamRsp.newBuilder().setEndOfStream(
-                                        ChangeStreamRsp.EndOfStream.getDefaultInstance()
+                                    ReadChangeRsp.newBuilder().setEndOfRead(
+                                        ReadChangeRsp.EndOfRead.newBuilder().setCursor(
+                                            Cursor.newBuilder().setColumnCursor(
+                                                columnCursor.toBuilder().setDataRange(
+                                                    columnCursor.dataRange.toBuilder()
+                                                        .setFrom(maxColumn)
+                                                        .setExcludeFrom(true)
+                                                )
+                                            )
+                                        )
                                     ).build()
                                 )
                             )
 
                         }
-                        ReadControlItemReq.ControlItemReqCase.DONE_SNAPSHOT_REQ -> {
+                        ReadCtlReq.CtlReqCase.DONE_SNAPSHOT_REQ -> {
                             // STEP 5: when upload of the table is over, you will be notified by client
                             // You can clean resources if you created some in BEGIN_SNAPSHOT_REQ
-                            val doneSnapshotReq = req.controlItemReq.doneSnapshotReq
+                            val doneSnapshotReq = req.readCtlReq.doneSnapshotReq
                             // If you saved some state during INIT_SNAPSHOT_REQ, you can use it here.
                             // Motivation why you should do it like this, but not with local variable
                             // is reconnections. State is represented by request, not by the state of the program
                             print("Restored snapshot state by client: ${doneSnapshotReq.snapshotState.toStringUtf8()}")
                             emit(
-                                mkRsp(cursor, DoneSnapshotRsp.getDefaultInstance())
+                                mkRsp(DoneSnapshotRsp.getDefaultInstance())
                             )
                         }
-                        null, ReadControlItemReq.ControlItemReqCase.CONTROLITEMREQ_NOT_SET ->
-                            emit(mkBadRsp(cursor, "no control item response"))
+                        null, ReadCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
+                            emit(mkBadRsp("no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
-                    emit(mkBadRsp(cursor, "exception occured: ${e.message}; full: ${e.toString()}"))
+                    emit(mkBadRsp("exception occured: ${e.message}; full: ${e.toString()}"))
                 }
             }
         }
@@ -765,20 +798,20 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         val pgReplicationPlugin = "wal2json"
 
         fun mkRsp(lsn: ColumnValue, controlItem: Any): StreamRsp {
-            val readControlItemBuilder = StreamControlItemRsp.newBuilder()
+            val streamCtlRsp = StreamCtlRsp.newBuilder()
             when (controlItem) {
-                is InitConnectionRsp -> readControlItemBuilder.initConnectionRsp = controlItem
-                is FixLsnRsp -> readControlItemBuilder.fixLsnRsp = controlItem
-                is CheckLsnRsp -> readControlItemBuilder.checkLsnRsp = controlItem
-                is ChangeStreamRsp -> readControlItemBuilder.changeStreamRsp = controlItem
-                is RewindLsnReq -> readControlItemBuilder.rewindLsnReq = controlItem
-                is LostRequestedLsnRsp -> readControlItemBuilder.lostRequestedLsnRsp = controlItem
+                is InitRsp -> streamCtlRsp.initRsp = controlItem
+                is FixLsnRsp -> streamCtlRsp.fixLsnRsp = controlItem
+                is CheckLsnRsp -> streamCtlRsp.checkLsnRsp = controlItem
+                is StreamChangeRsp -> streamCtlRsp.streamChangeRsp = controlItem
+                is RewindLsnReq -> streamCtlRsp.rewindLsnReq = controlItem
+                is LostRequestedLsnRsp -> streamCtlRsp.lostRequestedLsnRsp = controlItem
                 else -> throw IllegalArgumentException("Unknown control item type: ${controlItem.javaClass}")
             }
             return StreamRsp.newBuilder()
                 .setResult(RspUtil.resultOk)
                 .setLsn(lsn)
-                .setControlItemRsp(readControlItemBuilder.build())
+                .setStreamCtlRsp(streamCtlRsp)
                 .build()
         }
 
@@ -822,28 +855,28 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             requests.collect { req ->
                 val lsn = req.lsn
                 try {
-                    when (req.controlItemReq?.controlItemReqCase) {
-                        StreamControlItemReq.ControlItemReqCase.INIT_CONNECTION_REQ -> {
+                    when (req.streamCtlReq?.controlItemReqCase) {
+                        StreamCtlReq.ControlItemReqCase.INIT_REQ -> {
                             // STEP 1: this branch should initialize connection with database
                             // THIS STAGE IS NEVER SKIPPED BY CLIENT AFTER EACH gRPC REQUEST!
                             //
                             // This is the first control message that should be sent by client
                             // that established connection with service in order to
                             // service be able to establish connection with database
-                            val initConnReq = req.controlItemReq.initConnectionReq
+                            val initConnReq = req.streamCtlReq.initReq
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
                             this@PostgreSQL.ValidateSpec(initConnReq.jsonSettings)
                             val vanillaConnection = this@PostgreSQL.connectToPostgreSQL(initConnReq.jsonSettings)
                             replConnection = vanillaConnection.unwrap(PGConnection::class.java)
-                            emit(mkRsp(lsn, InitConnectionRsp.newBuilder().setClientId(clientId).build()))
+                            emit(mkRsp(lsn, InitRsp.newBuilder().setClientId(clientId).build()))
                         }
-                        StreamControlItemReq.ControlItemReqCase.FIX_LSN_REQ -> {
+                        StreamCtlReq.ControlItemReqCase.FIX_LSN_REQ -> {
                             // STEP 2: the next thing client will want is to fix LSN position
                             // This can be skipped if Client have already done this step and
                             // didn't send request for REWIND_LSN_REQ, or client received
                             // LostRequestedLsnRsp: un such cases client may request to fix LSN again
-                            val fixLsnReq = req.controlItemReq.fixLsnReq
+                            val fixLsnReq = req.streamCtlReq.fixLsnReq
                             when (fixLsnReq.streamSource.sourceCase) {
                                 FixLsnReq.StreamSource.SourceCase.CLUSTER -> {
                                     // OK
@@ -878,7 +911,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 )
                             )
                         }
-                        StreamControlItemReq.ControlItemReqCase.CHECK_LSN_REQ -> {
+                        StreamCtlReq.ControlItemReqCase.CHECK_LSN_REQ -> {
                             // normally, we should check if LSN still here, but
                             // I don't know how to do it yet.
                             // But client should periodically (e.g. once in 5 seconds)
@@ -886,7 +919,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val pingLsn = LogSequenceNumber.valueOf(lsn.string)
                             stream = stream.streamFromLsn(pingLsn)
                         }
-                        StreamControlItemReq.ControlItemReqCase.CHANGE_STREAM_REQ -> {
+                        StreamCtlReq.ControlItemReqCase.STREAM_CHANGE_REQ -> {
                             val waitLSN = LogSequenceNumber.valueOf(lsn.string)
                             if (waitLSN == LogSequenceNumber.INVALID_LSN) {
                                 throw DtExtensionException("Invalid LSN format.")
@@ -902,7 +935,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             wal2json.getDataChangeItems().forEach {
                                 emit(
                                     mkRsp(
-                                        lsn, ChangeStreamRsp.newBuilder()
+                                        lsn, StreamChangeRsp.newBuilder()
                                             .setChangeItem(
                                                 ChangeItem.newBuilder().setDataChangeItem(it)
                                             )
@@ -914,14 +947,15 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // don't forget to send final message
                             val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextLsn).build()
                             emit(mkRsp(nextLsnCol,
-                                ChangeStreamRsp.newBuilder()
-                                    .setEndOfStream(ChangeStreamRsp.EndOfStream.getDefaultInstance())
+                                StreamChangeRsp.newBuilder()
+                                    .setEndOfStream(EndOfStream.getDefaultInstance())
+                                    .build()
                             )
                             )
 
                         }
-                        StreamControlItemReq.ControlItemReqCase.REWIND_LSN_REQ -> {
-                            val rewindLsnReq = req.controlItemReq.rewindLsnReq
+                        StreamCtlReq.ControlItemReqCase.REWIND_LSN_REQ -> {
+                            val rewindLsnReq = req.streamCtlReq.rewindLsnReq
                             print("Restored snapshot state by client: ${rewindLsnReq.replicationState.toStringUtf8()}")
                             // drop allocated resource: replication slot
                             val slotName = genSlotName(clientId)
@@ -929,7 +963,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 .dropReplicationSlot(slotName)
                             emit(mkRsp(lsn, RewindLsnRsp.getDefaultInstance()))
                         }
-                        null, StreamControlItemReq.ControlItemReqCase.CONTROLITEMREQ_NOT_SET ->
+                        null, StreamCtlReq.ControlItemReqCase.CONTROLITEMREQ_NOT_SET ->
                             emit(mkBadRsp(lsn, "no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
