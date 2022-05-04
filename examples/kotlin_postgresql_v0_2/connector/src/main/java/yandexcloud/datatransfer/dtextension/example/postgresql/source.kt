@@ -72,10 +72,10 @@ object PsqlQueries {
     }
 
     fun listTablesQuery(schema: String): String {
-        val schemaCondition = if (schema == "*") {
-            "AND ns.nspname = \$1"
+        val schemaCondition = if (schema != "*") {
+            "AND ns.nspname = ?"
         } else {
-            "AND ns.nspname NOT IN (${pgSystemTableNames.joinToString { it }})"
+            "AND ns.nspname NOT IN (${pgSystemTableNames.joinToString { "'$it'" }})"
         }
 
         return """
@@ -101,16 +101,16 @@ WHERE
 	has_schema_privilege(ns.oid, 'USAGE')
 	AND has_table_privilege(c.oid, 'SELECT')
     $schemaCondition
-    AND c.relname NOT IN (${pgSystemSchemas.joinToString { it }})
+    AND c.relname NOT IN (${pgSystemSchemas.joinToString { "'$it'" }})
     AND c.relkind = 'r'
         """
     }
 
-    fun istTableSchemaQuery(): String {
+    fun listTableSchemaQuery(): String {
         return """
 SELECT column_name, data_type, column_default, is_nullable
 FROM INFORMATION_SCHEMA.COLUMNS
-WHERE table_schema = $1 AND table_name = $2;
+WHERE table_schema = ? AND table_name = ?;
         """
     }
 
@@ -126,7 +126,7 @@ WITH
 			pg_class c
 			INNER JOIN pg_namespace ns ON c.relnamespace = ns.oid
 		WHERE 
-            ns.nspname = $1 AND c.relname = $2
+            ns.nspname = ? AND c.relname = ?
             AND c.relkind = 'r'
 	),
 	unique_indexes AS (
@@ -285,7 +285,9 @@ data class Wal2JsonKeyChange(
 )
 
 data class PostgreSQLParameters(
-    val pg_jdbc_connection_string: String,
+    val jdbc_conn_string: String,
+    val user: String,
+    val password: String,
 )
 
 class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
@@ -294,7 +296,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     private fun ValidateSpec(jsonSpec: String) {
         val specPath = javaClass.getResource(specificationPath)
             ?: throw DtExtensionException("Spec file not found")
-        val specSchema = JSONSchema.parseFile(specPath.path)
+        val specSchema = JSONSchema.parse(specPath.readText())
         val output = specSchema.validateBasic(jsonSpec)
         if (output.errors != null) {
             val err = output.errors?.map { it.instanceLocation + "(" + it.keywordLocation + "):" + it.error }
@@ -306,16 +308,13 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
     private fun connectToPostgreSQL(jsonSpec: String): Connection {
         val parameters = Klaxon().parse<PostgreSQLParameters>(jsonSpec)
+            ?: throw DtExtensionException("Parameters cannot be empty")
 
-        val jdbcUrl = parameters?.pg_jdbc_connection_string
-            ?: throw DtExtensionException("JDBC PostgreSQL connection URL cannot be empty")
-
-        return DriverManager
-            .getConnection(jdbcUrl, "postgres", "postgres")
+        return DriverManager.getConnection(parameters.jdbc_conn_string, parameters.user, parameters.password)
     }
 
     private fun schemaQuery(connection: Connection, namespace: String, name: String): Schema {
-        val schemaQuery = connection.prepareStatement(PsqlQueries.istTableSchemaQuery())
+        val schemaQuery = connection.prepareStatement(PsqlQueries.listTableSchemaQuery())
         schemaQuery.setString(1, namespace)
         schemaQuery.setString(2, name)
         val schemaResult = schemaQuery.executeQuery()
@@ -358,24 +357,28 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         schema: Schema, limit: Int
     ): String {
         val colCursor = cursor.columnCursor ?: throw DtExtensionException("Only column cursor is supported")
-        val columnList = schema.columnsList.joinToString { "`${it.name}`" }
+        val columnList = schema.columnsList.joinToString { "\"${it.name}\"" }
         val leftWhere = colCursor.dataRange.from?.let {
-            if (colCursor.dataRange.excludeFrom) {
-                "AND `${colCursor.column.name}` > ${columnValueAsSqlString(it)}"
+            if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
+                ""
+            } else if (colCursor.dataRange.excludeFrom) {
+                "AND \"${colCursor.column.name}\" > ${columnValueAsSqlString(it)}"
             } else {
-                "AND `${colCursor.column.name}` >= ${columnValueAsSqlString(it)}"
+                "AND \"${colCursor.column.name}\" >= ${columnValueAsSqlString(it)}"
             }
         } ?: ""
         val rightWhere = colCursor.dataRange.to?.let {
-            if (colCursor.dataRange.excludeTo) {
-                "AND `${colCursor.column.name}` < ${columnValueAsSqlString(it)}"
+            if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
+                ""
+            }else if (colCursor.dataRange.excludeTo) {
+                "AND \"${colCursor.column.name}\" < ${columnValueAsSqlString(it)}"
             } else {
-                "AND `${colCursor.column.name}` <= ${columnValueAsSqlString(it)}"
+                "AND \"${colCursor.column.name}\" <= ${columnValueAsSqlString(it)}"
             }
         } ?: ""
         val query = """
             SELECT $columnList
-            FROM `$namespace`.`$name`
+            FROM "$namespace"."$name"
             WHERE 1=1
             $leftWhere
             $rightWhere
@@ -399,7 +402,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             ColumnType.COLUMN_TYPE_UINT64 -> return columnBuilder.setUint64(result.getLong(id)).build()
             ColumnType.COLUMN_TYPE_FLOAT -> return columnBuilder.setFloat(result.getFloat(id)).build()
             ColumnType.COLUMN_TYPE_DOUBLE -> return columnBuilder.setDouble(result.getDouble(id)).build()
-            ColumnType.COLUMN_TYPE_JSON -> return columnBuilder.setJson(result.getString(id)).build()
+            ColumnType.COLUMN_TYPE_JSON -> return columnBuilder.setJson(result.getString(id) ?: "").build()
             ColumnType.COLUMN_TYPE_DECIMAL -> {
                 val bigDecimal = result.getBigDecimal(id)
                 return columnBuilder.setDecimal(
@@ -421,7 +424,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 val isoFormat = date.toInstant().toString()
                 return columnBuilder.setString(isoFormat).build()
             }
-            ColumnType.COLUMN_TYPE_STRING -> return columnBuilder.setString(result.getString(id)).build()
+            ColumnType.COLUMN_TYPE_STRING -> return columnBuilder.setString(result.getString(id) ?: "").build()
             ColumnType.COLUMN_TYPE_BINARY,
             ColumnType.COLUMN_TYPE_UNSPECIFIED,
             ColumnType.UNRECOGNIZED -> {
@@ -453,7 +456,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             ColumnValue.DataCase.STRING -> columnValue.string
             ColumnValue.DataCase.BINARY -> throw DtExtensionException("Binary data is supposed to be non-printable")
             null, ColumnValue.DataCase.DATA_NOT_SET ->
-                throw DtExtensionException("No data to convert ty SQL representation")
+                throw DtExtensionException("No data to convert to SQL representation")
         }
     }
 
@@ -464,15 +467,19 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         column: Column,
         wholePrimaryKey: Boolean = false
     ): Cursor {
-        val query = "SELECT max(`$3`) FROM `$1`.`$2`"
+        val query = "SELECT max(\"${column.name}\") FROM \"${namespace}\".\"${name}\""
         val stmt = connection.prepareStatement(query)
-        stmt.setString(1, namespace)
-        stmt.setString(2, name)
-        stmt.setString(3, column.name)
         val result = stmt.executeQuery()
 
+
         if (!result.next()) {
-            throw DtExtensionException("Cannot get min/max for column")
+            throw DtExtensionException("Cannot get min/max for column: empty result set")
+        }
+        if (result.getObject(1) == null) {
+            // no actual data range: make column cursor with no data range
+            return Cursor.newBuilder().setColumnCursor(
+                ColumnCursor.newBuilder().setColumn(column).build()
+            ).build()
         }
         val rangeMax = this.getColumnValue(result, 1, column.type)
         return Cursor.newBuilder().setColumnCursor(
@@ -504,7 +511,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         while (result.next()) {
             val rowBuilder = PlainRow.newBuilder()
             for (id in 0 until result.metaData.columnCount) {
-                val value = getColumnValue(result, id, schema.columnsList.get(id).type)
+                val value = getColumnValue(result, id + 1, schema.columnsList.get(id).type)
                 rowBuilder.addValues(value)
             }
             changeItemList.add(rowBuilder.build())
@@ -544,7 +551,6 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
             val query = connection
                 .prepareStatement(PsqlQueries.listTablesQuery("*"))
-            query.setString(1, "*")
 
             val result = query.executeQuery()
 
@@ -558,7 +564,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 val schema = this.schemaQuery(connection, namespace, name)
                 tables.add(
                     Table.newBuilder()
-                        .setNamespace(Namespace.newBuilder().setNamespace(name))
+                        .setNamespace(Namespace.newBuilder().setNamespace(namespace))
                         .setName(name)
                         .setSchema(schema)
                         .build()
@@ -644,7 +650,10 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val col =
                                 schema.columnsList.find { it.name == colName && colName != "" }
                                     ?: schema.columnsList.find { it.key }
-                                    ?: throw DtExtensionException("Neither key, nor specified column was found")
+                                    ?: schema.columnsList.find { it.type == ColumnType.COLUMN_TYPE_INT64 }
+                                    ?: schema.columnsList.find { it.type == ColumnType.COLUMN_TYPE_INT32 }
+                                    ?: schema.columnsList.first()
+                                    ?: throw DtExtensionException("Couldn't find any matching column... suggest yours")
 
                             val newCursor = getAscendingCursor(
                                 connection,
@@ -697,6 +706,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                                 .setPlainRow(it)
                                         )
                                     )
+                                    .build()
                                 val cursorKey = controlItem.changeItem.dataChangeItem.plainRow.getValues(colCursorId)
                                 val newDataRange = Common.DataRange.newBuilder(columnCursor.dataRange)
                                     .let {
@@ -722,7 +732,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 mkRsp(
                                     endCursor, ChangeStreamRsp.newBuilder().setEndOfStream(
                                         ChangeStreamRsp.EndOfStream.getDefaultInstance()
-                                    )
+                                    ).build()
                                 )
                             )
 
@@ -743,7 +753,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             emit(mkBadRsp(cursor, "no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
-                    emit(mkBadRsp(cursor, "exception occured: ${e.message}"))
+                    emit(mkBadRsp(cursor, "exception occured: ${e.message}; full: ${e.toString()}"))
                 }
             }
         }
@@ -788,8 +798,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 if (this == null) {
                     val slotName = genSlotName(clientId)
                     // this are parameters specification for plugin
-                    val systemSchemasList = PsqlQueries.pgSystemSchemas.joinToString { "$it.*" }
-                    val systemTablesList = PsqlQueries.pgSystemSchemas.joinToString { "*.$it" }
+                    val systemSchemasList = PsqlQueries.pgSystemSchemas.joinToString { "\"$it\".*" }
+                    val systemTablesList = PsqlQueries.pgSystemSchemas.joinToString { "*.\"$it\"" }
                     return replConnection.replicationAPI
                         .replicationStream()
                         .logical()

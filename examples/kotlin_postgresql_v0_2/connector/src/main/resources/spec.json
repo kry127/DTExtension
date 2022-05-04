@@ -1,23 +1,43 @@
 {
   "$schema": "http://json-schema.org/draft/2019-09/schema",
-  "$id": "http://kry127.ru/kotlin_postgresql.json",
-  "title": "PostgreSQL config parameters",
+  "$id": "https://kry127.ru/kotlin_postgresql.json",
+  "title": "DTExtension PostgreSQL configuration",
   "type": "object",
   "default": {},
   "required": [
-    "pg_jdbc_connection_string"
+    "jdbc_conn_string",
+    "user",
+    "password"
   ],
   "properties": {
-    "pg_jdbc_connection_string": {
-      "title": "PostgreSQL connection string",
+    "jdbc_conn_string": {
+      "title": "JDBC Connection string",
       "type": "string",
       "default": "",
       "examples": [
-        " postgres://user:secret@localhost:5432/mydatabasename"
+        "jdbc:postgresql://localhost:5432/mydatabasename"
       ]
     },
+    "user": {
+      "title": "Username",
+      "type": "string",
+      "default": "",
+      "examples": [
+        "user"
+      ]
+    },
+    "password": {
+      "title": "Password",
+      "type": "string",
+      "default": "",
+      "examples": [
+        "password"
+      ]
+    }
   },
   "examples": [{
-    "pg_jdbc_connection_string": " postgres://user:secret@localhost:5432/mydatabasename"
+    "jdbc_conn_string": "jdbc:postgresql://localhost:5432/mydatabasename",
+    "user": "user",
+    "password": "password"
   }]
 }
