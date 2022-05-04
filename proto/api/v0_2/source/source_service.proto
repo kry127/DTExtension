@@ -31,14 +31,12 @@ message DiscoverRsp {
 
 message ReadReq {
     Table table = 1;
-    Cursor cursor = 2;
-    ReadControlItemReq control_item_req = 3;
+    ReadCtlReq read_ctl_req = 2;
 
 }
 message ReadRsp {
     Result result = 1;
-    Cursor cursor = 2;
-    ReadControlItemRsp control_item_rsp = 3;
+    ReadCtlRsp read_ctl_rsp = 2;
 }
 
 message StreamReq {
@@ -47,10 +45,10 @@ message StreamReq {
     // by the way, in MySQL/MongoDB we can make simple check: if LSN is presented in log, then
     // we have nothing missed. Otherwise, we missed the log position =(
     ColumnValue lsn = 2;
-    StreamControlItemReq control_item_req = 3;
+    StreamCtlReq stream_ctl_req = 3;
 }
 message StreamRsp {
     Result result = 1;
     ColumnValue lsn = 2;
-    StreamControlItemRsp control_item_rsp = 3;
+    StreamCtlRsp stream_ctl_rsp = 3;
 }
