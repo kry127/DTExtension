@@ -8,7 +8,6 @@ import net.pwall.json.schema.JSONSchema
 import org.postgresql.PGConnection
 import org.postgresql.replication.LogSequenceNumber
 import org.postgresql.replication.PGReplicationStream
-import yandexcloud.datatransfer.dtextension.v0_2.ColumnCursorKt
 import yandexcloud.datatransfer.dtextension.v0_2.Common
 import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
@@ -833,6 +832,16 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                     // this are parameters specification for plugin
                     val systemSchemasList = PsqlQueries.pgSystemSchemas.joinToString { "\"$it\".*" }
                     val systemTablesList = PsqlQueries.pgSystemSchemas.joinToString { "*.\"$it\"" }
+                    // TODO -- this API is not working... remake it with respect to PostgreSQL v.14
+                    // See queries here: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-REPLICATION
+                    // 1. Creation of slot:
+                    // SELECT pg_create_logical_replication_slot('test_slot', 'wal2json')
+                    // 2. Picking changes:
+                    // SELECT pg_logical_slot_peek_changes('test_slot', NULL, NULL, 'include-xids', 'true', 'actions', 'insert,update,delete', 'include-lsn', 'true', 'include-transaction', 'true');
+                    // 3. Moving slot:
+                    // SELECT pg_replication_slot_advance('test_slot', '9/C80001A0')
+                    // 4. Dropping slot
+                    // SELECT pg_drop_replication_slot('test_slot')
                     return replConnection.replicationAPI
                         .replicationStream()
                         .logical()
