@@ -11,6 +11,7 @@ import org.postgresql.replication.PGReplicationStream
 import yandexcloud.datatransfer.dtextension.v0_2.Common
 import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
+import yandexcloud.datatransfer.dtextension.v0_2.Common.EndCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Data.*
 import yandexcloud.datatransfer.dtextension.v0_2.source.Control.*
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceGrpcKt
@@ -736,6 +737,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val colCursorId = schema.columnsList.indexOfFirst { it.name == columnCursor.column.name }
                             if (colCursorId == -1) throw DtExtensionException("Column cursor not found in schema")
 
+                            // emit series of change items in row
                             changeItems.forEach {
                                 // emit change items
                                 val controlItem =
@@ -750,19 +752,26 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                     .build()
                                 emit(mkRsp(controlItem))
                             }
-                            // demarcate your end: respond with new data range still not transferred
+
+                            // define checkpoint cursor
+                            val checkpointCursor = if (changeItems.isEmpty()) {
+                                // if result is empty, declare as EOF
+                                Cursor.newBuilder().setEndCursor(EndCursor.getDefaultInstance())
+                            } else {
+                                // else, move cursor further and cooperate it to client
+                                Cursor.newBuilder().setColumnCursor(
+                                    columnCursor.toBuilder().setDataRange(
+                                        columnCursor.dataRange.toBuilder()
+                                            .setFrom(maxColumn)
+                                            .setExcludeFrom(true)
+                                    )
+                                )
+                            }
+                            // demarcate end of change item stream: pass the ball to client again
                             emit(
                                 mkRsp(
                                     ReadChangeRsp.newBuilder().setCheckpoint(
-                                        ReadChangeRsp.CheckPoint.newBuilder().setCursor(
-                                            Cursor.newBuilder().setColumnCursor(
-                                                columnCursor.toBuilder().setDataRange(
-                                                    columnCursor.dataRange.toBuilder()
-                                                        .setFrom(maxColumn)
-                                                        .setExcludeFrom(true)
-                                                )
-                                            )
-                                        )
+                                        ReadChangeRsp.CheckPoint.newBuilder().setCursor(checkpointCursor)
                                     ).build()
                                 )
                             )
