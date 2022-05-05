@@ -45,16 +45,16 @@ message ReadChangeReq {
 }
 // After receiving ReadChangeReq, server should produce series of ReadChangeRsp containing data in change_item
 // field. When sequence of ReadChangeRsp ends from server side, server should send last ReadChangeRsp message
-// with "end_of_read" message. The client should wait until this message until further actions.
+// with "checkpoint" message. The client should wait until this message until further actions.
 message ReadChangeRsp {
     oneof change_stream_item {
         ChangeItem change_item = 1;
-        EndOfRead end_of_read = 2;
+        CheckPoint checkpoint = 2;
     }
 
-    // End of stream message should advance cursor in order to retrieve new values,
+    // CheckPoint message should advance cursor in order to retrieve new values,
     // otherwise source may stuck sending the same values over and over again
-    message EndOfRead {
+    message CheckPoint {
         Cursor cursor = 1;
     }
 }
@@ -83,6 +83,7 @@ message CursorReq {
 }
 message CursorRsp {
     Cursor cursor = 1;
+    // TODO add statistics
 }
 
 // This message designates snapshot beginning
@@ -104,7 +105,7 @@ message DoneSnapshotRsp {}
 
 
 message StreamCtlReq {
-    oneof control_item_req {
+    oneof ctl_req {
         InitReq init_req = 1;
         FixLsnReq fix_lsn_req = 2;
         CheckLsnReq check_lsn_req = 3;
@@ -114,14 +115,14 @@ message StreamCtlReq {
 }
 
 message StreamCtlRsp {
-    oneof control_item_rsp {
+    oneof ctl_rsp {
         InitRsp init_rsp = 1;
         FixLsnRsp fix_lsn_rsp = 2;
         CheckLsnRsp check_lsn_rsp = 3;
         StreamChangeRsp stream_change_rsp = 4;
         RewindLsnReq rewind_lsn_req = 5;
 
-        LostRequestedLsnRsp lost_requested_lsn_rsp = 6;
+        LostLsnRsp lost_lsn_rsp = 6;
     }
 }
 
@@ -129,14 +130,14 @@ message StreamCtlRsp {
 message StreamChangeReq {}
 // After receiving StreamChangeReq, server should produce series of StreamChangeRsp containing data in change_item
 // field. When sequence of ChangeStreamRsp ends from server side, server should send last ChangeStreamRsp message
-// with "end_of_stream" message. Change items between StartTransaction and StopTransaction considered
+// with "checkpoint" message. Change items between StartTransaction and StopTransaction considered
 // within single transaction. The client should wait until message EndOfStream until further actions.
 message StreamChangeRsp {
     oneof change_stream_item {
         ChangeItem change_item = 1;
         StartTransaction start_transaction = 2;
         StopTransaction stop_transaction = 3;
-        EndOfStream end_of_stream = 4;
+        CheckPoint checkpoint = 4;
     }
 
     // This message identifies starting of the transaction, useful in Stream sources
@@ -147,7 +148,7 @@ message StreamChangeRsp {
     message StopTransaction {}
     // End of stream message should advance cursor in order to retrieve new values,
     // otherwise source may stuck sending the same values over and over again
-    message EndOfStream {}
+    message CheckPoint {}
 }
 
 // This message requests to fix current LSN for specified replication source
@@ -189,4 +190,4 @@ message RewindLsnRsp {}
 
 // This message notifies user that requested next item that his LSN
 // has been lost from the log.
-message LostRequestedLsnRsp {}
+message LostLsnRsp {}

@@ -58,9 +58,13 @@ message LineCursor {
     uint64 to_inclusive = 2;
 }
 
+// this cursor denotes empty set remaining
+message EndCursor {}
+
 message Cursor {
     oneof cursor {
         ColumnCursor column_cursor = 1;
         LineCursor line_cursor = 2;
+        EndCursor end_cursor = 3;
     }
 }

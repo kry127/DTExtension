@@ -13,7 +13,6 @@ import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
 import yandexcloud.datatransfer.dtextension.v0_2.Data.*
 import yandexcloud.datatransfer.dtextension.v0_2.source.Control.*
-import yandexcloud.datatransfer.dtextension.v0_2.source.Control.StreamChangeRsp.EndOfStream
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceGrpcKt
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.ReadRsp
@@ -754,8 +753,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // demarcate your end: respond with new data range still not transferred
                             emit(
                                 mkRsp(
-                                    ReadChangeRsp.newBuilder().setEndOfRead(
-                                        ReadChangeRsp.EndOfRead.newBuilder().setCursor(
+                                    ReadChangeRsp.newBuilder().setCheckpoint(
+                                        ReadChangeRsp.CheckPoint.newBuilder().setCursor(
                                             Cursor.newBuilder().setColumnCursor(
                                                 columnCursor.toBuilder().setDataRange(
                                                     columnCursor.dataRange.toBuilder()
@@ -804,7 +803,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 is CheckLsnRsp -> streamCtlRsp.checkLsnRsp = controlItem
                 is StreamChangeRsp -> streamCtlRsp.streamChangeRsp = controlItem
                 is RewindLsnReq -> streamCtlRsp.rewindLsnReq = controlItem
-                is LostRequestedLsnRsp -> streamCtlRsp.lostRequestedLsnRsp = controlItem
+                is LostLsnRsp -> streamCtlRsp.lostLsnRsp = controlItem
                 else -> throw IllegalArgumentException("Unknown control item type: ${controlItem.javaClass}")
             }
             return StreamRsp.newBuilder()
@@ -864,8 +863,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             requests.collect { req ->
                 val lsn = req.lsn
                 try {
-                    when (req.streamCtlReq?.controlItemReqCase) {
-                        StreamCtlReq.ControlItemReqCase.INIT_REQ -> {
+                    when (req.streamCtlReq?.ctlReqCase) {
+                        StreamCtlReq.CtlReqCase.INIT_REQ -> {
                             // STEP 1: this branch should initialize connection with database
                             // THIS STAGE IS NEVER SKIPPED BY CLIENT AFTER EACH gRPC REQUEST!
                             //
@@ -880,7 +879,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             replConnection = vanillaConnection.unwrap(PGConnection::class.java)
                             emit(mkRsp(lsn, InitRsp.newBuilder().setClientId(clientId).build()))
                         }
-                        StreamCtlReq.ControlItemReqCase.FIX_LSN_REQ -> {
+                        StreamCtlReq.CtlReqCase.FIX_LSN_REQ -> {
                             // STEP 2: the next thing client will want is to fix LSN position
                             // This can be skipped if Client have already done this step and
                             // didn't send request for REWIND_LSN_REQ, or client received
@@ -920,7 +919,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 )
                             )
                         }
-                        StreamCtlReq.ControlItemReqCase.CHECK_LSN_REQ -> {
+                        StreamCtlReq.CtlReqCase.CHECK_LSN_REQ -> {
                             // normally, we should check if LSN still here, but
                             // I don't know how to do it yet.
                             // But client should periodically (e.g. once in 5 seconds)
@@ -928,7 +927,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val pingLsn = LogSequenceNumber.valueOf(lsn.string)
                             stream = stream.streamFromLsn(pingLsn)
                         }
-                        StreamCtlReq.ControlItemReqCase.STREAM_CHANGE_REQ -> {
+                        StreamCtlReq.CtlReqCase.STREAM_CHANGE_REQ -> {
                             val waitLSN = LogSequenceNumber.valueOf(lsn.string)
                             if (waitLSN == LogSequenceNumber.INVALID_LSN) {
                                 throw DtExtensionException("Invalid LSN format.")
@@ -957,13 +956,13 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextLsn).build()
                             emit(mkRsp(nextLsnCol,
                                 StreamChangeRsp.newBuilder()
-                                    .setEndOfStream(EndOfStream.getDefaultInstance())
+                                    .setCheckpoint(StreamChangeRsp.CheckPoint.getDefaultInstance())
                                     .build()
                             )
                             )
 
                         }
-                        StreamCtlReq.ControlItemReqCase.REWIND_LSN_REQ -> {
+                        StreamCtlReq.CtlReqCase.REWIND_LSN_REQ -> {
                             val rewindLsnReq = req.streamCtlReq.rewindLsnReq
                             print("Restored snapshot state by client: ${rewindLsnReq.replicationState.toStringUtf8()}")
                             // drop allocated resource: replication slot
@@ -972,7 +971,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 .dropReplicationSlot(slotName)
                             emit(mkRsp(lsn, RewindLsnRsp.getDefaultInstance()))
                         }
-                        null, StreamCtlReq.ControlItemReqCase.CONTROLITEMREQ_NOT_SET ->
+                        null, StreamCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
                             emit(mkBadRsp(lsn, "no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
