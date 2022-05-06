@@ -264,6 +264,13 @@ data class Wal2JsonChange(
         return Schema.newBuilder().addAllColumns(columns).build()
     }
 
+    fun toTable(): Table {
+        val schema = this.toSchema()
+        return Table.newBuilder().setSchema(schema).setName(this.table).setNamespace(
+            Namespace.newBuilder().setNamespace(this.schema)
+        ).build()
+    }
+
     fun toDataChangeItem(): DataChangeItem {
         val opType = when (kind) {
             "insert" -> OpType.OP_TYPE_INSERT
@@ -273,7 +280,7 @@ data class Wal2JsonChange(
         }
         return DataChangeItem.newBuilder()
             .setOpType(opType)
-            .setSchema(this.toSchema())
+            .setTable(this.toTable())
             .setPlainRow(this.toPlainRow())
             .build()
     }
@@ -735,8 +742,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                     ReadChangeRsp.newBuilder().setChangeItem(
                                         ChangeItem.newBuilder().setDataChangeItem(
                                             DataChangeItem.newBuilder()
-                                                .setSchema(schema)
                                                 .setOpType(OpType.OP_TYPE_INSERT)
+                                                .setTable(table)
                                                 .setPlainRow(it)
                                         )
                                     )

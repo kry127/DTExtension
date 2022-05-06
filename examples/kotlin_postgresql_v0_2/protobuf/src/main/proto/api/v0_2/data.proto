@@ -56,8 +56,8 @@ message HomoChangeItem {
 }
 
 message DataChangeItem {
-    Schema schema = 1;
-    OpType op_type = 2;
+    OpType op_type = 1;
+    Table table = 2;
     oneof format {
         PlainRow plain_row = 11;
         Parquet parquet = 12;
