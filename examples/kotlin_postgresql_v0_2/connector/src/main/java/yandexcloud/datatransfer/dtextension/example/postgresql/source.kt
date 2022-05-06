@@ -55,7 +55,7 @@ object PsqlQueries {
         }
         when (pgType) {
             "timestamp without time zone", "timestamp with time zone", "time without time zone", "time with time zone", "date" ->
-                return ColumnType.COLUMN_TYPE_ISO_TIME
+                return ColumnType.COLUMN_TYPE_UNIX_TIME
             "uuid", "name", "text", "interval", "char", "abstime", "money"
             -> return ColumnType.COLUMN_TYPE_STRING
             "boolean" -> return ColumnType.COLUMN_TYPE_BOOL
@@ -221,7 +221,7 @@ data class Wal2JsonChange(
         }
         when (pgTypeTrim) {
             "timestamp without time zone", "timestamp with time zone", "time without time zone", "time with time zone", "date"
-            -> return columnBuilder.setIsoTime(columnValue).build()
+            -> return columnBuilder.setUnixTime(Klaxon().parse<Long>(columnValue)!!).build()
             "uuid", "name", "text", "interval", "char", "abstime", "money"
             -> return columnBuilder.setString(columnValue).build()
             "boolean" -> return columnBuilder.setBool(Klaxon().parse<Boolean>(columnValue)!!).build()
@@ -439,12 +439,6 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 return columnBuilder.setBigDecimal(result.getBigDecimal(id).toString()).build()
             }
             ColumnType.COLUMN_TYPE_UNIX_TIME -> return columnBuilder.setUnixTime(result.getTimestamp(id).time).build()
-            ColumnType.COLUMN_TYPE_ISO_TIME -> {
-                // https://mkyong.com/java/how-to-get-current-timestamps-in-java/
-                val date = result.getTimestamp(id)
-                val isoFormat = date.toInstant().toString()
-                return columnBuilder.setString(isoFormat).build()
-            }
             ColumnType.COLUMN_TYPE_STRING -> return columnBuilder.setString(result.getString(id) ?: "").build()
             ColumnType.COLUMN_TYPE_BINARY,
             ColumnType.COLUMN_TYPE_UNSPECIFIED,
@@ -470,9 +464,6 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             ColumnValue.DataCase.UNIX_TIME -> {
                 val iso = java.time.Instant.ofEpochSecond(columnValue.unixTime).toString()
                 "'${iso}' ::TIMESTAMP WITH TIME ZONE"
-            }
-            ColumnValue.DataCase.ISO_TIME -> {
-                "'${columnValue.isoTime}' ::TIMESTAMP WITH TIME ZONE"
             }
             ColumnValue.DataCase.STRING -> columnValue.string
             ColumnValue.DataCase.BINARY -> throw DtExtensionException("Binary data is supposed to be non-printable")

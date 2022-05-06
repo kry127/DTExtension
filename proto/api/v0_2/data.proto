@@ -88,9 +88,8 @@ enum ColumnType {
     COLUMN_TYPE_BIG_DECIMAL = 10;
     COLUMN_TYPE_BIG_INTEGER = 11;
     COLUMN_TYPE_UNIX_TIME = 12;
-    COLUMN_TYPE_ISO_TIME = 13;
-    COLUMN_TYPE_STRING = 14;
-    COLUMN_TYPE_BINARY = 15;
+    COLUMN_TYPE_STRING = 13;
+    COLUMN_TYPE_BINARY = 14;
 }
 
 message Decimal {
@@ -113,9 +112,8 @@ message ColumnValue {
         string big_decimal = 10;
         string big_integer = 11;
         int64 unix_time = 12;
-        string iso_time = 13;
-        string string = 14;
-        bytes binary = 15;
+        string string = 13;
+        bytes binary = 14;
     }
 }
 
@@ -133,9 +131,8 @@ message ParquetValue {
         ParquetString big_decimal = 10;
         ParquetString big_integer = 11;
         ParquetInt64 unix_time = 12;
-        ParquetString iso_time = 13;
-        ParquetString string = 14;
-        ParquetBytes binary = 15;
+        ParquetString string = 13;
+        ParquetBytes binary = 14;
     }
 
     message ParquetBool {
