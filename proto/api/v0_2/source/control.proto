@@ -121,8 +121,6 @@ message StreamCtlRsp {
         CheckLsnRsp check_lsn_rsp = 3;
         StreamChangeRsp stream_change_rsp = 4;
         RewindLsnReq rewind_lsn_req = 5;
-
-        LostLsnRsp lost_lsn_rsp = 6;
     }
 }
 
@@ -143,6 +141,7 @@ message StreamChangeRsp {
         StartTransaction start_transaction = 3;
         StopTransaction stop_transaction = 4;
         CheckPoint checkpoint = 5;
+        LostLsn lost_lsn = 6;
     }
 
     // This message identifies starting of the transaction, useful in Stream sources
@@ -154,6 +153,9 @@ message StreamChangeRsp {
     // End of stream message should advance cursor in order to retrieve new values,
     // otherwise source may stuck sending the same values over and over again
     message CheckPoint {}
+    // This message notifies user that requested next item that his LSN
+    // has been lost from the log.
+    message LostLsn {}
 }
 
 message StreamSource {
@@ -186,18 +188,15 @@ message FixLsnRsp {
 }
 
 // This message queries is LSN is still presented in the stream
-// If LSN lost, LostRequestedLsnRsp should be returned
 message CheckLsnReq {
     Lsn lsn = 1;
 }
-message CheckLsnRsp {}
+message CheckLsnRsp {
+    bool alive = 1;
+}
 
 // This message rewinds LSN (e.g. makes it no longer fixed to a certain point)
 message RewindLsnReq {
     Lsn lsn = 1;
 }
 message RewindLsnRsp {}
-
-// This message notifies user that requested next item that his LSN
-// has been lost from the log.
-message LostLsnRsp {}
