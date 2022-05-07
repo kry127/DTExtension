@@ -59,21 +59,6 @@ message ReadChangeRsp {
     }
 }
 
-
-// InitConnectionReq -- is the first connection message that is needed to initiate
-// connection with source database with settings used by user
-// client_id -- when non empty, used to identify client that may perform multiple operations on service.
-// You may ignore this field if you make implementation for single client
-message InitReq {
-    string json_settings = 1;
-    string client_id = 2;
-}
-// client_id -- generated client id, if it was empty in `InitConnectionReq`
-// You may ignore this field if you make implementation for single client
-message InitRsp {
-    string client_id = 2;
-}
-
 // This message is sent in order to acquire snapshot cursor
 // that will iterate through snapshotting values
 // note, that cursor value will be stored in general response

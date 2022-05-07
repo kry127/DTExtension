@@ -25,6 +25,21 @@ message CheckRsp {
     Result result = 1;
 }
 
+// InitConnectionReq -- is the first streaming message that established bidirectional connection for
+// Read, Stream and Write gRPC calls. It signals endpoint code to initiate
+// connection with source database with settings used by user
+// client_id -- when non empty, used to identify client that may perform multiple operations on service.
+// You may ignore this field if you make implementation for single client
+message InitReq {
+    string json_settings = 1;
+    string client_id = 2;
+}
+// client_id -- generated client id, if it was empty in `InitConnectionReq`
+// You may ignore this field if you make implementation for single client
+message InitRsp {
+    string client_id = 2;
+}
+
 // this message represents an interval in form [from; to]
 // each of begin or end of the interval can be excluded with
 // "exclude_from" and "exclude_to" flags

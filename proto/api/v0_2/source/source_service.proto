@@ -4,7 +4,8 @@ package yandexcloud.datatransfer.dtextension.v0_2.source;
 
 import "api/v0_2/common.proto";
 import "api/v0_2/data.proto";
-import "api/v0_2/source/control.proto";
+import "api/v0_2/source/read.proto";
+import "api/v0_2/source/stream.proto";
 
 service SourceService {
     // Spec is method for determining endpoint settings available for configuring
