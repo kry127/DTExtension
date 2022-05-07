@@ -38,7 +38,9 @@ message StreamCtlRsp {
 }
 
 // This message requests stream of data change item
-message StreamChangeReq {}
+message StreamChangeReq {
+    Lsn lsn = 1;
+}
 // After receiving StreamChangeReq, server should produce series of StreamChangeRsp containing data in change_item
 // field. When sequence of ChangeStreamRsp ends from server side, server should send last ChangeStreamRsp message
 // with "checkpoint" message. Change items between StartTransaction and StopTransaction considered
@@ -65,7 +67,9 @@ message StreamChangeRsp {
     message StopTransaction {}
     // End of stream message should advance cursor in order to retrieve new values,
     // otherwise source may stuck sending the same values over and over again
-    message CheckPoint {}
+    message CheckPoint {
+        Lsn lsn = 1;
+    }
     // This message notifies user that requested next item that his LSN
     // has been lost from the log.
     message LostLsn {}
