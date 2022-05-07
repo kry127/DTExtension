@@ -43,8 +43,8 @@ message StreamChangeReq {
 }
 // After receiving StreamChangeReq, server should produce series of StreamChangeRsp containing data in change_item
 // field. When sequence of ChangeStreamRsp ends from server side, server should send last ChangeStreamRsp message
-// with "checkpoint" message. Change items between StartTransaction and StopTransaction considered
-// within single transaction. The client should wait until message EndOfStream until further actions.
+// with "checkpoint" message. Change items sent from StreamChangeReq until CheckPoint considered as a
+// single transaction with respective LSN borders. The client should wait until message CheckPoint until further actions.
 message StreamChangeRsp {
 
     // Specify unix time of change commit if you have this information. You are able to ignore this data
@@ -53,18 +53,10 @@ message StreamChangeRsp {
 
     oneof change_stream_item {
         ChangeItem change_item = 2;
-        StartTransaction start_transaction = 3;
-        StopTransaction stop_transaction = 4;
-        CheckPoint checkpoint = 5;
-        LostLsn lost_lsn = 6;
+        CheckPoint checkpoint = 3;
+        LostLsn lost_lsn = 4;
     }
 
-    // This message identifies starting of the transaction, useful in Stream sources
-    message StartTransaction {}
-    // This message identifies stopping the transaction
-    // The messages of variant type change_item in ChangeStreamRsp between StartTransactionRsp and StopTransactionRsp
-    // are identified as single transaction
-    message StopTransaction {}
     // End of stream message should advance cursor in order to retrieve new values,
     // otherwise source may stuck sending the same values over and over again
     message CheckPoint {
