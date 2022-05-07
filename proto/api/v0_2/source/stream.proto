@@ -33,7 +33,7 @@ message StreamCtlRsp {
         FixLsnRsp fix_lsn_rsp = 2;
         CheckLsnRsp check_lsn_rsp = 3;
         StreamChangeRsp stream_change_rsp = 4;
-        RewindLsnReq rewind_lsn_req = 5;
+        RewindLsnRsp rewind_lsn_rsp = 5;
     }
 }
 
