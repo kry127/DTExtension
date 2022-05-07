@@ -21,8 +21,8 @@ import "api/v0_2/data.proto";
 message ReadCtlReq {
     oneof ctl_req {
         InitReq init_req = 1;
-        ReadChangeReq read_change_req = 2;
-        CursorReq cursor_req = 3;
+        CursorReq cursor_req = 2;
+        ReadChangeReq read_change_req = 3;
         BeginSnapshotReq begin_snapshot_req = 4;
         DoneSnapshotReq done_snapshot_req = 5;
     }
@@ -32,8 +32,8 @@ message ReadCtlReq {
 message ReadCtlRsp {
     oneof ctl_rsp {
         InitRsp init_rsp = 1;
-        ReadChangeRsp read_change_rsp = 2;
-        CursorRsp cursor_rsp = 3;
+        CursorRsp cursor_rsp = 2;
+        ReadChangeRsp read_change_rsp = 3;
         BeginSnapshotRsp begin_snapshot_rsp = 4;
         DoneSnapshotRsp done_snapshot_rsp = 5;
     }

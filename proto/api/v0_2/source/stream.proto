@@ -22,8 +22,8 @@ message StreamCtlReq {
         InitReq init_req = 1;
         FixLsnReq fix_lsn_req = 2;
         CheckLsnReq check_lsn_req = 3;
-        StreamChangeReq stream_change_req = 4;
-        RewindLsnReq rewind_lsn_req = 5;
+        RewindLsnReq rewind_lsn_req = 4;
+        StreamChangeReq stream_change_req = 5;
     }
 }
 
@@ -32,8 +32,8 @@ message StreamCtlRsp {
         InitRsp init_rsp = 1;
         FixLsnRsp fix_lsn_rsp = 2;
         CheckLsnRsp check_lsn_rsp = 3;
-        StreamChangeRsp stream_change_rsp = 4;
-        RewindLsnRsp rewind_lsn_rsp = 5;
+        RewindLsnRsp rewind_lsn_rsp = 4;
+        StreamChangeRsp stream_change_rsp = 5;
     }
 }
 
@@ -46,11 +46,6 @@ message StreamChangeReq {
 // with "checkpoint" message. Change items sent from StreamChangeReq until CheckPoint considered as a
 // single transaction with respective LSN borders. The client should wait until message CheckPoint until further actions.
 message StreamChangeRsp {
-
-    // Specify unix time of change commit if you have this information. You are able to ignore this data
-    // Zero value interpreted as no info provided.
-    uint64 unix_commit_time = 1;
-
     oneof change_stream_item {
         ChangeItem change_item = 2;
         CheckPoint checkpoint = 3;
@@ -61,6 +56,10 @@ message StreamChangeRsp {
     // otherwise source may stuck sending the same values over and over again
     message CheckPoint {
         Lsn lsn = 1;
+
+        // Specify unix time of change commit if you have this information. You are able to ignore this data
+        // Zero value interpreted as no info provided.
+        uint64 unix_commit_time = 2;
     }
     // This message notifies user that requested next item that his LSN
     // has been lost from the log.
