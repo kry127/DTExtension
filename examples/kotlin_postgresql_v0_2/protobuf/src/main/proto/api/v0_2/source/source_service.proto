@@ -1,0 +1,49 @@
+syntax="proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2.source;
+
+import "api/v0_2/common.proto";
+import "api/v0_2/data.proto";
+import "api/v0_2/source/read.proto";
+import "api/v0_2/source/stream.proto";
+
+service SourceService {
+    // Spec is method for determining endpoint settings available for configuring
+    rpc Spec(SpecReq) returns (SpecRsp) {}
+    // Check is method that checks settings of endpoint are comply to specification
+    // In order to see specification see Spec handle
+    rpc Check(CheckReq) returns (CheckRsp) {}
+    // Method discover is used to fetch available replication objects
+    rpc Discover(DiscoverReq) returns (DiscoverRsp) {}
+
+    rpc Read(stream ReadReq) returns (stream ReadRsp) {}
+    rpc Stream(stream StreamReq) returns (stream StreamRsp) {}
+}
+
+message DiscoverReq {
+    // this JSON should comply to SpecRsp.json_spec returned by 'Spec' handle
+    // and should be verified by Check rpc handle as compliant
+    string json_settings = 1;
+}
+message DiscoverRsp {
+    Result result = 1;
+    repeated Table tables = 2;
+}
+
+message ReadReq {
+    Table table = 1;
+    ReadCtlReq read_ctl_req = 2;
+
+}
+message ReadRsp {
+    Result result = 1;
+    ReadCtlRsp read_ctl_rsp = 2;
+}
+
+message StreamReq {
+    StreamCtlReq stream_ctl_req = 3;
+}
+message StreamRsp {
+    Result result = 1;
+    StreamCtlRsp stream_ctl_rsp = 3;
+}

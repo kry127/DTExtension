@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+// Author: kry127
+// Purpose: this file defines control messages that solve two problems:
+//   1. At Least Once guarantee for data ingestion
+//   2. Parallelization of snapshot process
+
+package yandexcloud.datatransfer.dtextension.v0_2.source;
+
+import "api/v0_2/common.proto";
+import "api/v0_2/data.proto";
+
+// There are two types of control items:
+//  1. ReadControlItemReq/ReadControlItemRsp -- control items for Read protocol
+//  2. StreamControlItemReq/StreamControlItemRsp -- control items for Stream protocol
+// Most commonly, there is such system of interaction: client sends "<Type>Req" message,
+// and server responds with single "<Type>Rsp" message.
+// The only exception is ChangeStreamReq -- this single request produces multibple ChangeStreamRsp.
+
+message StreamCtlReq {
+    oneof ctl_req {
+        InitReq init_req = 1;
+        FixLsnReq fix_lsn_req = 2;
+        CheckLsnReq check_lsn_req = 3;
+        RewindLsnReq rewind_lsn_req = 4;
+        StreamChangeReq stream_change_req = 5;
+    }
+}
+
+message StreamCtlRsp {
+    oneof ctl_rsp {
+        InitRsp init_rsp = 1;
+        FixLsnRsp fix_lsn_rsp = 2;
+        CheckLsnRsp check_lsn_rsp = 3;
+        RewindLsnRsp rewind_lsn_rsp = 4;
+        StreamChangeRsp stream_change_rsp = 5;
+    }
+}
+
+// This message requests stream of data change item
+message StreamChangeReq {
+    Lsn lsn = 1;
+}
+// After receiving StreamChangeReq, server should produce series of StreamChangeRsp containing data in change_item
+// field. When sequence of ChangeStreamRsp ends from server side, server should send last ChangeStreamRsp message
+// with "checkpoint" message. Change items sent from StreamChangeReq until CheckPoint considered as a
+// single transaction with respective LSN borders. The client should wait until message CheckPoint until further actions.
+message StreamChangeRsp {
+    oneof change_stream_item {
+        ChangeItem change_item = 2;
+        CheckPoint checkpoint = 3;
+        LostLsn lost_lsn = 4;
+    }
+
+    // End of stream message should advance cursor in order to retrieve new values,
+    // otherwise source may stuck sending the same values over and over again
+    message CheckPoint {
+        Lsn lsn = 1;
+
+        // Specify unix time of change commit if you have this information. You are able to ignore this data
+        // Zero value interpreted as no info provided.
+        uint64 unix_commit_time = 2;
+    }
+    // This message notifies user that requested next item that his LSN
+    // has been lost from the log.
+    message LostLsn {}
+}
+
+message StreamSource {
+    oneof source {
+        Table table = 1;
+        Namespace namespace = 2;
+        Cluster cluster = 3;
+    }
+
+    // this means it contains all namespaces -- all possible messages are replicated
+    message Cluster {}
+}
+
+// LSN is defined by source from where LSN is dragged and value of LSN itself
+message Lsn {
+    StreamSource stream_source = 1;
+    ColumnValue lsn = 2;
+    // this is an optional field associated with LSN allocation if source have to store some additional info for fixing LSN position
+    bytes replication_state = 3;
+}
+
+// This message requests to fix current LSN for specified replication source
+// The returned message is user LSN that designate where stream will be read from
+// After this message, each further read of item moves LSN forward
+message FixLsnReq {
+    StreamSource stream_source = 1;
+}
+message FixLsnRsp {
+    Lsn lsn = 1;
+}
+
+// This message queries is LSN is still presented in the stream
+message CheckLsnReq {
+    Lsn lsn = 1;
+}
+message CheckLsnRsp {
+    bool alive = 1;
+}
+
+// This message rewinds LSN (e.g. makes it no longer fixed to a certain point)
+message RewindLsnReq {
+    Lsn lsn = 1;
+}
+message RewindLsnRsp {}

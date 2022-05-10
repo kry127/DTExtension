@@ -12,8 +12,10 @@ import yandexcloud.datatransfer.dtextension.v0_2.Common
 import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.EndCursor
+import yandexcloud.datatransfer.dtextension.v0_2.Common.InitRsp
 import yandexcloud.datatransfer.dtextension.v0_2.Data.*
-import yandexcloud.datatransfer.dtextension.v0_2.source.Control.*
+import yandexcloud.datatransfer.dtextension.v0_2.source.Read.*
+import yandexcloud.datatransfer.dtextension.v0_2.source.Stream.*
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceGrpcKt
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.ReadRsp
@@ -797,78 +799,87 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         }
     }
 
+
+    // Working with PostgreSQL WAL LSN, as PgJDBC one is not working
+    // See queries here: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-REPLICATION
+    // 1. Creation of slot:
+    // SELECT pg_create_logical_replication_slot('test_slot', 'wal2json')
+    // 2. Picking changes:
+    // SELECT pg_logical_slot_peek_changes('test_slot', NULL, NULL, 'include-xids', 'true', 'actions', 'insert,update,delete', 'include-lsn', 'true', 'include-transaction', 'true');
+    // 3. Moving slot:
+    // SELECT pg_replication_slot_advance('test_slot', '9/C80001A0')
+    // SELECT pg_logical_slot_get_changes('test_slot', '9/C80001A0', NULL, 'include-xids', 'true', 'actions', 'insert,update,delete', 'include-lsn', 'true', 'include-transaction', 'true');
+    // 4. Dropping slot
+    // SELECT pg_drop_replication_slot('test_slot')
+    private fun walLockLsnQuery(slotName: String) : String {
+        return "SELECT (pg_create_logical_replication_slot('$slotName', 'wal2json')).lsn"
+    }
+
+    private fun walPeakChangesQuery(slotName: String) : String {
+        return "SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data" +
+                "FROM (" +
+                "    SELECT pg_logical_slot_peek_changes($slotName, NULL, NULL," +
+                "    'include-xids', 'true'," +
+                "    'actions', 'insert,update,delete'," +
+                "    'include-lsn', 'true'," +
+                "    'include-transaction', 'true')" +
+                ") AS T"
+    }
+
+    private fun walCheckLsnQuery(slotName: String, lsnFrom: String) : String {
+        return  "    SELECT (pg_logical_slot_peek_changes($slotName, $lsnFrom, 1," +
+                "    'include-xids', 'true'," +
+                "    'actions', 'insert,update,delete'," +
+                "    'include-lsn', 'true'," +
+                "    'include-transaction', 'true')).lsn"
+    }
+
+    private fun walMoveSlotQuery(slotName: String, lsn: String) : String {
+        // no rights on this command in MDB:
+        // return "SELECT pg_replication_slot_advance('$slotName', '${lsn}')"
+        return "SELECT pg_logical_slot_get_changes($slotName, $lsn, NULL," +
+                "'include-xids', 'true'," +
+                "'actions', 'insert,update,delete'," +
+                "'include-lsn', 'true'," +
+                "'include-transaction', 'true')"
+    }
+
+    private fun walDeleteSlotQuery(slotName: String): String {
+        return "SELECT pg_drop_replication_slot('$slotName')"
+    }
+
+
     override fun stream(requests: Flow<SourceServiceOuterClass.StreamReq>): Flow<StreamRsp> {
         // we'll use this plugin for replication:
         // https://github.com/eulerto/wal2json
         val pgReplicationPlugin = "wal2json"
 
-        fun mkRsp(lsn: ColumnValue, controlItem: Any): StreamRsp {
+        fun mkRsp(controlItem: Any): StreamRsp {
             val streamCtlRsp = StreamCtlRsp.newBuilder()
             when (controlItem) {
                 is InitRsp -> streamCtlRsp.initRsp = controlItem
                 is FixLsnRsp -> streamCtlRsp.fixLsnRsp = controlItem
                 is CheckLsnRsp -> streamCtlRsp.checkLsnRsp = controlItem
                 is StreamChangeRsp -> streamCtlRsp.streamChangeRsp = controlItem
-                is RewindLsnReq -> streamCtlRsp.rewindLsnReq = controlItem
-                is LostLsnRsp -> streamCtlRsp.lostLsnRsp = controlItem
+                is RewindLsnRsp -> streamCtlRsp.rewindLsnRsp = controlItem
                 else -> throw IllegalArgumentException("Unknown control item type: ${controlItem.javaClass}")
             }
             return StreamRsp.newBuilder()
                 .setResult(RspUtil.resultOk)
-                .setLsn(lsn)
                 .setStreamCtlRsp(streamCtlRsp)
                 .build()
         }
 
-        fun mkBadRsp(cursor: ColumnValue, error: String): StreamRsp =
-            StreamRsp.newBuilder().setLsn(cursor).setResult(RspUtil.resultError(error)).build()
+        fun mkBadRsp(error: String): StreamRsp =
+            StreamRsp.newBuilder().setResult(RspUtil.resultError(error)).build()
 
         return flow {
             lateinit var clientId: String
-            lateinit var replConnection: PGConnection
-            lateinit var stream: PGReplicationStream
+            lateinit var connection: Connection
 
             fun genSlotName(clientId: String) = "slot_for_$clientId"
 
-            // use this function monodically on stream, e.g.
-            // ```stream = stream.restoreFromLsn(lsn)```
-            fun PGReplicationStream?.streamFromLsn(lsn: LogSequenceNumber): PGReplicationStream {
-                if (this == null) {
-                    val slotName = genSlotName(clientId)
-                    // this are parameters specification for plugin
-                    val systemSchemasList = PsqlQueries.pgSystemSchemas.joinToString { "\"$it\".*" }
-                    val systemTablesList = PsqlQueries.pgSystemSchemas.joinToString { "*.\"$it\"" }
-                    // TODO -- this API is not working... remake it with respect to PostgreSQL v.14
-                    // See queries here: https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-REPLICATION
-                    // 1. Creation of slot:
-                    // SELECT pg_create_logical_replication_slot('test_slot', 'wal2json')
-                    // 2. Picking changes:
-                    // SELECT pg_logical_slot_peek_changes('test_slot', NULL, NULL, 'include-xids', 'true', 'actions', 'insert,update,delete', 'include-lsn', 'true', 'include-transaction', 'true');
-                    // 3. Moving slot:
-                    // SELECT pg_replication_slot_advance('test_slot', '9/C80001A0')
-                    // 4. Dropping slot
-                    // SELECT pg_drop_replication_slot('test_slot')
-                    return replConnection.replicationAPI
-                        .replicationStream()
-                        .logical()
-                        .withSlotName(slotName)
-                        .withSlotOption("include-xids", true)
-                        .withSlotOption("include-lsn", true)
-                        .withSlotOption("include-timestamp", true)
-                        .withSlotOption("include-transaction", true)
-                        .withSlotOption("filter-tables", "$systemSchemasList,$systemTablesList")
-                        .withStartPosition(lsn)
-                        .start()
-                }
-                this.setAppliedLSN(lsn)
-                this.setFlushedLSN(lsn)
-                // ping that we're still here
-                this.forceUpdateStatus()
-                return this
-            }
-
             requests.collect { req ->
-                val lsn = req.lsn
                 try {
                     when (req.streamCtlReq?.ctlReqCase) {
                         StreamCtlReq.CtlReqCase.INIT_REQ -> {
@@ -882,9 +893,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
                             this@PostgreSQL.ValidateSpec(initConnReq.jsonSettings)
-                            val vanillaConnection = this@PostgreSQL.connectToPostgreSQL(initConnReq.jsonSettings)
-                            replConnection = vanillaConnection.unwrap(PGConnection::class.java)
-                            emit(mkRsp(lsn, InitRsp.newBuilder().setClientId(clientId).build()))
+                            connection = this@PostgreSQL.connectToPostgreSQL(initConnReq.jsonSettings)
+                            emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         StreamCtlReq.CtlReqCase.FIX_LSN_REQ -> {
                             // STEP 2: the next thing client will want is to fix LSN position
@@ -893,26 +903,28 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // LostRequestedLsnRsp: un such cases client may request to fix LSN again
                             val fixLsnReq = req.streamCtlReq.fixLsnReq
                             when (fixLsnReq.streamSource.sourceCase) {
-                                FixLsnReq.StreamSource.SourceCase.CLUSTER -> {
+                                StreamSource.SourceCase.CLUSTER -> {
                                     // OK
                                 }
-                                FixLsnReq.StreamSource.SourceCase.TABLE,
-                                FixLsnReq.StreamSource.SourceCase.NAMESPACE,
-                                null, FixLsnReq.StreamSource.SourceCase.SOURCE_NOT_SET -> {
+                                StreamSource.SourceCase.TABLE,
+                                StreamSource.SourceCase.NAMESPACE,
+                                null, StreamSource.SourceCase.SOURCE_NOT_SET -> {
                                     throw DtExtensionException("Only whole cluster cursor is acceptable")
                                 }
                             }
 
                             val slotName = genSlotName(clientId)
-                            val slot = replConnection.getReplicationAPI()
-                                .createReplicationSlot()
-                                .logical()
-                                .withSlotName(slotName)
-                                .withOutputPlugin(pgReplicationPlugin)
-                                .make()
+                            val lockLsnQ = walLockLsnQuery((slotName))
+                            val stmt = connection.prepareStatement(lockLsnQ)
+                            val lockResult = stmt.executeQuery()
+                            if (!lockResult.next()) {
+                                emit(mkBadRsp("cannot fix LSN: no LSN point provided"))
+                                return@collect
+                            }
+                            val lsnAsString = lockResult.getString(1)
 
                             // after creating slot, save it's LSN in the format of column
-                            val slotLsn = ColumnValue.newBuilder().setString(slot.consistentPoint.asString()).build()
+                            val slotLsn = ColumnValue.newBuilder().setString(lsnAsString).build()
 
                             // you can identify allocated resources here, for instance,
                             // you may save slot name that was just created
@@ -920,19 +932,49 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val replicationState = ByteString.copyFromUtf8("Hello, world!")
                             emit(
                                 mkRsp(
-                                    slotLsn, FixLsnRsp.newBuilder()
-                                        .setReplicationState(replicationState)
+                                    FixLsnRsp.newBuilder()
+                                        .setLsn(Lsn.newBuilder()
+                                            .setReplicationState(replicationState)
+                                            .setStreamSource(StreamSource.newBuilder().setCluster(StreamSource.Cluster.getDefaultInstance()))
+                                            .setLsn(slotLsn)
+                                        )
                                         .build()
                                 )
                             )
                         }
                         StreamCtlReq.CtlReqCase.CHECK_LSN_REQ -> {
-                            // normally, we should check if LSN still here, but
-                            // I don't know how to do it yet.
-                            // But client should periodically (e.g. once in 5 seconds)
-                            // ping that handle in order to make connection alive
-                            val pingLsn = LogSequenceNumber.valueOf(lsn.string)
-                            stream = stream.streamFromLsn(pingLsn)
+                            // normally, we should check if LSN still here, but PostgreSQL guarantees
+                            // LSN persistance if user hasn't moves slot of replication.
+                            val forLsn = req.streamCtlReq.checkLsnReq.lsn
+                            val slotName = genSlotName(clientId)
+                            val lockLsnQ = walCheckLsnQuery(slotName, forLsn.lsn.string)
+                            val stmt = connection.prepareStatement(lockLsnQ)
+                            val checkResult = stmt.executeQuery()
+                            if (!checkResult.next()) {
+                                emit(mkBadRsp("Lost LSN position: ${forLsn.lsn.string}"))
+                                return@collect
+                            }
+
+                            val lsnAsString = checkResult.getString(1)
+                            if (lsnAsString != forLsn.lsn.string) {
+                                emit(mkBadRsp("Mismatch of requested LSN healthcheck and returned: expected ${forLsn.lsn.string}, actual $lsnAsString"))
+                                return@collect
+                            }
+                            // emit all ok
+                            emit(mkRsp(CheckLsnRsp.newBuilder().setAlive(true).build()))
+                        }
+                        StreamCtlReq.CtlReqCase.REWIND_LSN_REQ -> {
+                            val forLsn = req.streamCtlReq.rewindLsnReq.lsn
+                            val slotName = genSlotName(clientId)
+                            val lockLsnQ = walDeleteSlotQuery((slotName))
+                            val stmt = connection.prepareStatement(lockLsnQ)
+                            val lockResult = stmt.executeQuery()
+                            if (!lockResult.next()) {
+                                emit(mkBadRsp("cannot remove LSN: empty result set"))
+                                return@collect
+                            }
+                            // emit OK otherwise
+                            emit(mkRsp(RewindLsnRsp.newBuilder().build()))
                         }
                         StreamCtlReq.CtlReqCase.STREAM_CHANGE_REQ -> {
                             val waitLSN = LogSequenceNumber.valueOf(lsn.string)
@@ -968,15 +1010,6 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             )
                             )
 
-                        }
-                        StreamCtlReq.CtlReqCase.REWIND_LSN_REQ -> {
-                            val rewindLsnReq = req.streamCtlReq.rewindLsnReq
-                            print("Restored snapshot state by client: ${rewindLsnReq.replicationState.toStringUtf8()}")
-                            // drop allocated resource: replication slot
-                            val slotName = genSlotName(clientId)
-                            replConnection.getReplicationAPI()
-                                .dropReplicationSlot(slotName)
-                            emit(mkRsp(lsn, RewindLsnRsp.getDefaultInstance()))
                         }
                         null, StreamCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
                             emit(mkBadRsp(lsn, "no control item response"))

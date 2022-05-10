@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package yandexcloud.datatransfer.dtextension.v0_2;
+
+message Namespace {
+    string namespace = 1;
+}
+
+message Table {
+    Namespace namespace = 1;
+    string name = 2;
+    Schema schema = 3;
+}
+
+message Schema {
+    repeated Column columns = 1;
+}
+
+message Column {
+    string name = 1;
+    bool key = 2;
+    ColumnType type = 3;
+    optional OriginalType original_type = 4;
+
+    // in the case of homo transfers the developer of pair src-dst can transmit extended types
+    message OriginalType {
+        // use connector_id to identify connector source which produces original type
+        // this is recommended because of the data representation that can differ
+        string connector_id = 1;
+        // custom type name
+        string type_name = 2;
+    }
+}
+
+
+enum OpType {
+    OP_TYPE_UNSPECIFIED = 0;
+    OP_TYPE_INSERT = 1;
+    OP_TYPE_UPDATE = 2;
+    OP_TYPE_DELETE = 3;
+}
+
+message ChangeItem {
+    oneof change_item {
+        DataChangeItem data_change_item = 1;
+        HomoChangeItem homo_change_item = 2;
+    }
+}
+
+// this item is specific to concrete pair source-destination, so use of
+// this message is discouraged. However it can make more precise
+// transfer in homo case. For example, you can use it for DDL transfer
+message HomoChangeItem {
+    string connector_id = 1;
+    bytes change_item = 2;
+}
+
+message DataChangeItem {
+    OpType op_type = 1;
+    Table table = 2;
+    oneof format {
+        PlainRow plain_row = 11;
+        Parquet parquet = 12;
+    }
+}
+
+// the change item in form of plain row
+message PlainRow {
+    repeated ColumnValue values = 1;
+}
+// the change item in parquet format
+// that means that multiple change items are packed in column-oriented way
+message Parquet {
+    repeated ParquetValue parquet_values = 1;
+}
+
+enum ColumnType {
+    COLUMN_TYPE_UNSPECIFIED = 0;
+    COLUMN_TYPE_BOOL = 1;
+    COLUMN_TYPE_INT32 = 2;
+    COLUMN_TYPE_INT64 = 3;
+    COLUMN_TYPE_UINT32 = 4;
+    COLUMN_TYPE_UINT64 = 5;
+    COLUMN_TYPE_FLOAT = 6;
+    COLUMN_TYPE_DOUBLE = 7;
+    COLUMN_TYPE_JSON = 8;
+    COLUMN_TYPE_DECIMAL = 9;
+    COLUMN_TYPE_BIG_DECIMAL = 10;
+    COLUMN_TYPE_BIG_INTEGER = 11;
+    COLUMN_TYPE_UNIX_TIME = 12;
+    COLUMN_TYPE_STRING = 13;
+    COLUMN_TYPE_BINARY = 14;
+}
+
+message Decimal {
+    string as_string = 1;
+    uint32 precision = 2;
+    uint32 scale = 3;
+}
+
+message ColumnValue {
+    oneof data {
+        bool bool = 1;
+        int32 int32 = 2;
+        int64 int64 = 3;
+        uint32 uint32 = 4;
+        uint64 uint64 = 5;
+        float float = 6;
+        double double = 7;
+        string json = 8;
+        Decimal decimal = 9;
+        string big_decimal = 10;
+        string big_integer = 11;
+        int64 unix_time = 12;
+        string string = 13;
+        bytes binary = 14;
+    }
+}
+
+message ParquetValue {
+    oneof data {
+        ParquetBool bool = 1;
+        ParquetInt32 int32 = 2;
+        ParquetInt64 int64 = 3;
+        ParquetUInt32 uint32 = 4;
+        ParquetUInt64 uint64 = 5;
+        ParquetFloat float = 6;
+        ParquetDouble double = 7;
+        ParquetString json = 8;
+        ParquetDecimal decimal = 9;
+        ParquetString big_decimal = 10;
+        ParquetString big_integer = 11;
+        ParquetInt64 unix_time = 12;
+        ParquetString string = 13;
+        ParquetBytes binary = 14;
+    }
+
+    message ParquetBool {
+        repeated bool values = 1;
+    }
+    message ParquetInt32 {
+        repeated int32 values = 1;
+    }
+    message ParquetInt64 {
+        repeated int64 values = 1;
+    }
+    message ParquetUInt32 {
+        repeated uint32 values = 1;
+    }
+    message ParquetUInt64 {
+        repeated int64 values = 1;
+    }
+    message ParquetFloat {
+        repeated float values = 1;
+    }
+    message ParquetDouble {
+        repeated double values = 1;
+    }
+    message ParquetString {
+        repeated string values = 1;
+    }
+    message ParquetDecimal {
+        repeated Decimal values = 1;
+    }
+    message ParquetBytes {
+        repeated bytes values = 1;
+    }
+}
