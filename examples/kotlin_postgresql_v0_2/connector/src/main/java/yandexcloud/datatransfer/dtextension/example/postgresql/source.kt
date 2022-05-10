@@ -5,9 +5,6 @@ import com.google.protobuf.ByteString
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import net.pwall.json.schema.JSONSchema
-import org.postgresql.PGConnection
-import org.postgresql.replication.LogSequenceNumber
-import org.postgresql.replication.PGReplicationStream
 import yandexcloud.datatransfer.dtextension.v0_2.Common
 import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
@@ -196,6 +193,11 @@ data class Wal2JsonMessage(
     val change: List<Wal2JsonChange>
 ) {
     fun getDataChangeItems(): List<DataChangeItem> = change.map { it.toDataChangeItem() }
+    fun unixTimestamp() : Long {
+        // val template = "2006-01-02 15:04:05.999999999-07"
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSSSSSX")
+        return sdf.parse(this.timestamp).time
+    }
 }
 
 data class Wal2JsonChange(
@@ -812,18 +814,11 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     // 4. Dropping slot
     // SELECT pg_drop_replication_slot('test_slot')
     private fun walLockLsnQuery(slotName: String) : String {
-        return "SELECT (pg_create_logical_replication_slot('$slotName', 'wal2json')).lsn"
-    }
+        // we'll use this plugin for replication:
+        // https://github.com/eulerto/wal2json
+        val pgReplicationPlugin = "wal2json"
 
-    private fun walPeakChangesQuery(slotName: String) : String {
-        return "SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data" +
-                "FROM (" +
-                "    SELECT pg_logical_slot_peek_changes($slotName, NULL, NULL," +
-                "    'include-xids', 'true'," +
-                "    'actions', 'insert,update,delete'," +
-                "    'include-lsn', 'true'," +
-                "    'include-transaction', 'true')" +
-                ") AS T"
+        return "SELECT (pg_create_logical_replication_slot('$slotName', '$pgReplicationPlugin')).lsn"
     }
 
     private fun walCheckLsnQuery(slotName: String, lsnFrom: String) : String {
@@ -832,6 +827,17 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 "    'actions', 'insert,update,delete'," +
                 "    'include-lsn', 'true'," +
                 "    'include-transaction', 'true')).lsn"
+    }
+
+    private fun walPeakChangesQuery(slotName: String, lsn: String, limit: Int) : String {
+        return "SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data" +
+                "FROM (" +
+                "    SELECT pg_logical_slot_peek_changes($slotName, $lsn, $limit," +
+                "    'include-xids', 'true'," +
+                "    'actions', 'insert,update,delete'," +
+                "    'include-lsn', 'true'," +
+                "    'include-transaction', 'true')" +
+                ") AS T"
     }
 
     private fun walMoveSlotQuery(slotName: String, lsn: String) : String {
@@ -848,12 +854,37 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         return "SELECT pg_drop_replication_slot('$slotName')"
     }
 
+    private fun getCurrentLsn(connection: Connection, slotName: String): String? {
+        val peakOneChange = walCheckLsnQuery(slotName, "NULL")
+        val stmt = connection.prepareStatement(peakOneChange)
+        val getLsnResult = stmt.executeQuery()
+        if (!getLsnResult.next()) {
+            return null
+        }
+        val lsn = getLsnResult.getString(1)
+        getLsnResult.close()
+        return lsn
+    }
+
+    private fun checkSlot(connection: Connection, slotName: String, lsn: String): Boolean {
+        val checkLsnQ = walCheckLsnQuery(slotName, lsn)
+        val stmt = connection.prepareStatement(checkLsnQ)
+        val checkResult = stmt.executeQuery()
+        if (!checkResult.next()) {
+            return false
+        }
+
+        return true
+    }
+
+    private fun forwardSlot(connection: Connection, slotName: String, beyondLsn: String) {
+        val moveLsnQ = walMoveSlotQuery(slotName, beyondLsn)
+        val stmt = connection.prepareStatement(moveLsnQ)
+        val moveResult = stmt.executeQuery()
+        moveResult.close()
+    }
 
     override fun stream(requests: Flow<SourceServiceOuterClass.StreamReq>): Flow<StreamRsp> {
-        // we'll use this plugin for replication:
-        // https://github.com/eulerto/wal2json
-        val pgReplicationPlugin = "wal2json"
-
         fun mkRsp(controlItem: Any): StreamRsp {
             val streamCtlRsp = StreamCtlRsp.newBuilder()
             when (controlItem) {
@@ -872,6 +903,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
         fun mkBadRsp(error: String): StreamRsp =
             StreamRsp.newBuilder().setResult(RspUtil.resultError(error)).build()
+
+        val clusterSource = StreamSource.newBuilder().setCluster(StreamSource.Cluster.getDefaultInstance())
 
         return flow {
             lateinit var clientId: String
@@ -900,7 +933,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // STEP 2: the next thing client will want is to fix LSN position
                             // This can be skipped if Client have already done this step and
                             // didn't send request for REWIND_LSN_REQ, or client received
-                            // LostRequestedLsnRsp: un such cases client may request to fix LSN again
+                            // LostRequestedLsnRsp: on such cases client may request to fix LSN again
                             val fixLsnReq = req.streamCtlReq.fixLsnReq
                             when (fixLsnReq.streamSource.sourceCase) {
                                 StreamSource.SourceCase.CLUSTER -> {
@@ -922,6 +955,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 return@collect
                             }
                             val lsnAsString = lockResult.getString(1)
+                            lockResult.close()
 
                             // after creating slot, save it's LSN in the format of column
                             val slotLsn = ColumnValue.newBuilder().setString(lsnAsString).build()
@@ -935,7 +969,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                     FixLsnRsp.newBuilder()
                                         .setLsn(Lsn.newBuilder()
                                             .setReplicationState(replicationState)
-                                            .setStreamSource(StreamSource.newBuilder().setCluster(StreamSource.Cluster.getDefaultInstance()))
+                                            .setStreamSource(clusterSource)
                                             .setLsn(slotLsn)
                                         )
                                         .build()
@@ -945,19 +979,11 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                         StreamCtlReq.CtlReqCase.CHECK_LSN_REQ -> {
                             // normally, we should check if LSN still here, but PostgreSQL guarantees
                             // LSN persistance if user hasn't moves slot of replication.
-                            val forLsn = req.streamCtlReq.checkLsnReq.lsn
+                            val forLsn = req.streamCtlReq.checkLsnReq.lsn.lsn.string
                             val slotName = genSlotName(clientId)
-                            val lockLsnQ = walCheckLsnQuery(slotName, forLsn.lsn.string)
-                            val stmt = connection.prepareStatement(lockLsnQ)
-                            val checkResult = stmt.executeQuery()
-                            if (!checkResult.next()) {
-                                emit(mkBadRsp("Lost LSN position: ${forLsn.lsn.string}"))
-                                return@collect
-                            }
-
-                            val lsnAsString = checkResult.getString(1)
-                            if (lsnAsString != forLsn.lsn.string) {
-                                emit(mkBadRsp("Mismatch of requested LSN healthcheck and returned: expected ${forLsn.lsn.string}, actual $lsnAsString"))
+                            val hasData = this@PostgreSQL.checkSlot(connection, slotName, forLsn)
+                            if (!hasData) {
+                                emit(mkBadRsp("Slot has been lost because of no data: lsn=$forLsn"))
                                 return@collect
                             }
                             // emit all ok
@@ -966,56 +992,74 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                         StreamCtlReq.CtlReqCase.REWIND_LSN_REQ -> {
                             val forLsn = req.streamCtlReq.rewindLsnReq.lsn
                             val slotName = genSlotName(clientId)
-                            val lockLsnQ = walDeleteSlotQuery((slotName))
-                            val stmt = connection.prepareStatement(lockLsnQ)
+                            val deleteSlotQ = walDeleteSlotQuery(slotName)
+                            val stmt = connection.prepareStatement(deleteSlotQ)
                             val lockResult = stmt.executeQuery()
                             if (!lockResult.next()) {
                                 emit(mkBadRsp("cannot remove LSN: empty result set"))
                                 return@collect
                             }
+                            lockResult.close()
                             // emit OK otherwise
                             emit(mkRsp(RewindLsnRsp.newBuilder().build()))
                         }
                         StreamCtlReq.CtlReqCase.STREAM_CHANGE_REQ -> {
-                            val waitLSN = LogSequenceNumber.valueOf(lsn.string)
-                            if (waitLSN == LogSequenceNumber.INVALID_LSN) {
-                                throw DtExtensionException("Invalid LSN format.")
-                            }
-                            stream = stream.streamFromLsn(waitLSN)
-                            val wal2jsonBuf = stream.read()
-                                ?: throw DtExtensionException("wal2json returned null byte buffer")
+                            val changeReq = req.streamCtlReq.streamChangeReq
+                            val forLsn = changeReq.lsn.lsn.string
+                            val slotName = genSlotName(clientId)
 
-                            val wal2jsonStr = StandardCharsets.UTF_8.decode(wal2jsonBuf).toString()
-                            val wal2json = Klaxon().parse<Wal2JsonMessage>(wal2jsonStr)
-                                ?: throw DtExtensionException("Wrong format of wal2json message")
+                            // rewind LSN to committed position by client
+                            forwardSlot(connection, slotName, forLsn)
+                            // peak next change(changes) from stream
+                            val peakWalChangesReq = walPeakChangesQuery(slotName, forLsn, limit=1)
+                            val stmt = connection.prepareStatement(peakWalChangesReq)
+                            val getChangesResult = stmt.executeQuery()
+                            // expect only single result
+                            if (getChangesResult.next()) {
+                                val lsn = getChangesResult.getString(1)
+                                val data = getChangesResult.getString(2)
+                                if (lsn != forLsn) {
+                                    return@collect
+                                }
 
-                            wal2json.getDataChangeItems().forEach {
-                                emit(
-                                    mkRsp(
-                                        lsn, StreamChangeRsp.newBuilder()
-                                            .setChangeItem(
-                                                ChangeItem.newBuilder().setDataChangeItem(it)
-                                            )
-                                            .build()
+                                val wal2json = Klaxon().parse<Wal2JsonMessage>(data)
+                                    ?: throw DtExtensionException("Wrong format of wal2json message")
+
+                                wal2json.getDataChangeItems().forEach {
+                                    emit(
+                                        mkRsp(
+                                            StreamChangeRsp.newBuilder()
+                                                .setChangeItem(
+                                                    ChangeItem.newBuilder().setDataChangeItem(it)
+                                                )
+                                                .build()
+                                        )
                                     )
+                                }
+
+                                // don't forget to send final message
+                                val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextLsn).build()
+                                emit(mkRsp(
+                                    StreamChangeRsp.newBuilder()
+                                        .setCheckpoint(StreamChangeRsp.CheckPoint.newBuilder()
+                                            .setUnixCommitTime(wal2json.unixTimestamp())
+                                            .setLsn(
+                                                Lsn.newBuilder()
+                                                    .setStreamSource(clusterSource)
+                                                    .setLsn(nextLsnCol)
+                                            )
+                                        ) .build()
+                                )
                                 )
                             }
-
-                            // don't forget to send final message
-                            val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextLsn).build()
-                            emit(mkRsp(nextLsnCol,
-                                StreamChangeRsp.newBuilder()
-                                    .setCheckpoint(StreamChangeRsp.CheckPoint.getDefaultInstance())
-                                    .build()
-                            )
-                            )
+                            getChangesResult.close()
 
                         }
                         null, StreamCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
-                            emit(mkBadRsp(lsn, "no control item response"))
+                            emit(mkBadRsp("no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
-                    emit(mkBadRsp(lsn, "exception occured: ${e.message}"))
+                    emit(mkBadRsp("exception occured: ${e.message}"))
                 }
             }
         }
