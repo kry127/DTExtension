@@ -2,7 +2,7 @@ import org.gradle.kotlin.dsl.dependencies;
 
 plugins {
     java
-    kotlin("jvm") version "1.6.0"
+    kotlin("jvm") version "1.6.20"
 }
 
 repositories {

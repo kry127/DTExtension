@@ -17,7 +17,6 @@ import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceGrpcKt
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.ReadRsp
 import yandexcloud.datatransfer.dtextension.v0_2.source.SourceServiceOuterClass.StreamRsp
-import java.nio.charset.StandardCharsets
 import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.ResultSet
@@ -75,7 +74,7 @@ object PsqlQueries {
         val schemaCondition = if (schema != "*") {
             "AND ns.nspname = ?"
         } else {
-            "AND ns.nspname NOT IN (${pgSystemTableNames.joinToString { "'$it'" }})"
+            "AND ns.nspname NOT IN (${pgSystemSchemas.joinToString { "'$it'" }})"
         }
 
         return """
@@ -188,7 +187,7 @@ ORDER BY row_number
 
 data class Wal2JsonMessage(
     val xid: Long,
-    val nextLsn: String,
+    val nextlsn: String,
     val timestamp: String,
     val change: List<Wal2JsonChange>
 ) {
@@ -204,12 +203,12 @@ data class Wal2JsonChange(
     val kind: String,
     val schema: String,
     val table: String,
-    val columnnames: List<String>,
-    val columntypes: List<String>,
-    val columnvalues: List<String>,
-    var oldkeys: Wal2JsonKeyChange
+    val columnnames: List<String> = listOf(),
+    val columntypes: List<String> = listOf(),
+    val columnvalues: List<Any> = listOf(),
+    var oldkeys: Wal2JsonKeyChange = Wal2JsonKeyChange(listOf(), listOf(), listOf()),
 ) {
-    private fun getColumnValue(columnType: String, columnValue: String): ColumnValue {
+    private fun getColumnValue(columnType: String, columnValue: Any): ColumnValue {
         val columnBuilder = ColumnValue.newBuilder()
 
         val pgPrefix = "pg:"
@@ -218,34 +217,34 @@ data class Wal2JsonChange(
         } else columnType
 
         if (pgTypeTrim.startsWith("character") or pgTypeTrim.startsWith("character varying")) {
-            return columnBuilder.setString(columnValue).build()
+            return columnBuilder.setString(columnValue.toString()).build()
         }
         if (pgTypeTrim.startsWith("bit(") or pgTypeTrim.startsWith("bit varying(")) {
-            return columnBuilder.setBinary(ByteString.copyFromUtf8(columnValue)).build()
+            return columnBuilder.setBinary(ByteString.copyFromUtf8(columnValue.toString())).build()
         }
         when (pgTypeTrim) {
             "timestamp without time zone", "timestamp with time zone", "time without time zone", "time with time zone", "date"
-            -> return columnBuilder.setUnixTime(Klaxon().parse<Long>(columnValue)!!).build()
+            -> return columnBuilder.setUnixTime(columnValue as Long).build()
             "uuid", "name", "text", "interval", "char", "abstime", "money"
-            -> return columnBuilder.setString(columnValue).build()
-            "boolean" -> return columnBuilder.setBool(Klaxon().parse<Boolean>(columnValue)!!).build()
-            "bigint" -> return columnBuilder.setInt64(Klaxon().parse<Long>(columnValue)!!).build()
-            "integer", "smallint" -> return columnBuilder.setInt32(Klaxon().parse<Int>(columnValue)!!).build()
-            "numeric", "real", "double precision" -> return columnBuilder.setBigDecimal(columnValue).build()
-            "bytea", "bit", "bit varying" -> columnBuilder.setBinary(ByteString.copyFromUtf8(columnValue)).build()
-            "json", "jsonb" -> return columnBuilder.setJson(columnValue).build()
+            -> return columnBuilder.setString(columnValue.toString()).build()
+            "boolean" -> return columnBuilder.setBool(columnValue as Boolean).build()
+            "bigint" -> return columnBuilder.setInt64(columnValue as Long).build()
+            "integer", "smallint" -> return columnBuilder.setInt32(columnValue as Int).build()
+            "numeric", "real", "double precision" -> return columnBuilder.setBigDecimal(columnValue as String).build()
+            "bytea", "bit", "bit varying" -> columnBuilder.setBinary(ByteString.copyFromUtf8(columnValue as String)).build()
+            "json", "jsonb" -> return columnBuilder.setJson(columnValue as String).build()
             "daterange", "int4range", "int8range", "numrange", "point", "tsrange",
             "tstzrange", "xml", "inet", "cidr", "macaddr", "oid" ->
-                return columnBuilder.setString(columnValue).build()
-            else -> return columnBuilder.setString(columnValue).build()
+                return columnBuilder.setString(columnValue as String).build()
+            else -> return columnBuilder.setString(columnValue.toString()).build()
         }
         return columnBuilder.build()
     }
 
     fun toPlainRow(): PlainRow {
         val rowBuilder = PlainRow.newBuilder()
-        columntypes.zip(columnvalues).map {
-            val value = this.getColumnValue(it.first, it.second)
+        columntypes.zip(columnvalues).map { (colType, colValue) ->
+            val value = this.getColumnValue(colType, colValue)
             rowBuilder.addValues(value)
         }
         return rowBuilder.build()
@@ -368,19 +367,19 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         cursor: ColumnCursor, namespace: String, name: String, window: Int) : String{
         val whereClause = cursor.dataRange.from?.let {
             if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
-                ""
+                null
             } else if (cursor.dataRange.excludeFrom) {
                 "\"${cursor.column.name}\" > ${columnValueAsSqlString(it)}"
             } else {
                 "\"${cursor.column.name}\" >= ${columnValueAsSqlString(it)}"
             }
-        }
+        } ?.let { "WHERE $it"} ?: ""
         return """
             SELECT max("${cursor.column.name}")
             FROM (
               SELECT "${cursor.column.name}"
               FROM "$namespace"."$name"
-              WHERE $whereClause
+              $whereClause
               LIMIT $window
             ) as sq;
             """
@@ -393,7 +392,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         val columnList = schema.columnsList.joinToString { "\"${it.name}\"" }
         val leftWhere = cursor.dataRange.from?.let {
             if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
-                ""
+                null
             } else if (cursor.dataRange.excludeFrom) {
                 "AND \"${cursor.column.name}\" > ${columnValueAsSqlString(it)}"
             } else {
@@ -402,7 +401,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         } ?: ""
         val rightWhere = cursor.dataRange.to?.let {
             if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
-                ""
+                null
             }else if (cursor.dataRange.excludeTo) {
                 "AND \"${cursor.column.name}\" < ${columnValueAsSqlString(it)}"
             } else {
@@ -468,7 +467,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             ColumnValue.DataCase.UINT64 -> columnValue.uint64.toString()
             ColumnValue.DataCase.FLOAT -> columnValue.float.toString()
             ColumnValue.DataCase.DOUBLE -> columnValue.double.toString()
-            ColumnValue.DataCase.JSON -> columnValue.json
+            ColumnValue.DataCase.JSON -> "'${columnValue.json}'"
             ColumnValue.DataCase.DECIMAL -> columnValue.decimal.asString
             ColumnValue.DataCase.BIG_DECIMAL -> columnValue.bigDecimal
             ColumnValue.DataCase.BIG_INTEGER -> columnValue.bigInteger
@@ -476,7 +475,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 val iso = java.time.Instant.ofEpochSecond(columnValue.unixTime).toString()
                 "'${iso}' ::TIMESTAMP WITH TIME ZONE"
             }
-            ColumnValue.DataCase.STRING -> columnValue.string
+            ColumnValue.DataCase.STRING -> "'${columnValue.string}'"
             ColumnValue.DataCase.BINARY -> throw DtExtensionException("Binary data is supposed to be non-printable")
             null, ColumnValue.DataCase.DATA_NOT_SET ->
                 throw DtExtensionException("No data to convert to SQL representation")
@@ -536,7 +535,11 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         val maxWindowQuery = extractMaxColumnInWindow(columnCursor, namespace, name, window)
         val maxWindowStmt = connection.prepareStatement(maxWindowQuery)
         val maxWindowResult = maxWindowStmt.executeQuery()
+        if (!maxWindowResult.next()) {
+            throw DtExtensionException("max aggregaion should contain at least one value")
+        }
         val maxColumnValue = getColumnValue(maxWindowResult, 1, columnCursor.column.type)
+        maxWindowResult.close()
 
         // we calculated c, the next step is to guarantee, that whole interval [a, c] will be transfered
         val deltaCursor = columnCursor.toBuilder().setDataRange(
@@ -707,7 +710,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // STEP 3: this is just a notification when uploading of the table is starting
                             // NOTE: client can skip this step if it already began to upload table, but reconnection happened
                             val state = "Hello, world!"
-                            print("Setting begin snapshot state: $state")
+                            println("Setting begin snapshot state: $state, for: ${req.table}")
                             val controlItem =
                                 BeginSnapshotRsp.newBuilder()
                                     // you may set here additional state that will be restored on DONE_SNAPSHOT_REQ
@@ -795,7 +798,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             emit(mkBadRsp("no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
-                    emit(mkBadRsp("exception occured: ${e.message}; full: ${e.toString()}"))
+                    emit(mkBadRsp("exception occured: ${e.message}; full: $e"))
                 }
             }
         }
@@ -821,19 +824,17 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         return "SELECT (pg_create_logical_replication_slot('$slotName', '$pgReplicationPlugin')).lsn"
     }
 
-    private fun walCheckLsnQuery(slotName: String, lsnFrom: String) : String {
-        return  "    SELECT (pg_logical_slot_peek_changes($slotName, $lsnFrom, 1," +
-                "    'include-xids', 'true'," +
-                "    'actions', 'insert,update,delete'," +
-                "    'include-lsn', 'true'," +
-                "    'include-transaction', 'true')).lsn"
+    private fun walGetCommittedLsn(slotName: String) : String {
+        return  "SELECT confirmed_flush_lsn FROM pg_replication_slots\n" +
+                "WHERE slot_name='$slotName';"
     }
 
-    private fun walPeakChangesQuery(slotName: String, lsn: String, limit: Int) : String {
+    private fun walPeakChangesQuery(slotName: String, limit: Int) : String {
         return "SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data" +
-                "FROM (" +
-                "    SELECT pg_logical_slot_peek_changes($slotName, $lsn, $limit," +
+                " FROM (" +
+                "    SELECT pg_logical_slot_peek_changes('$slotName', NULL, $limit," +
                 "    'include-xids', 'true'," +
+                "    'include-timestamp', 'true'," +
                 "    'actions', 'insert,update,delete'," +
                 "    'include-lsn', 'true'," +
                 "    'include-transaction', 'true')" +
@@ -843,8 +844,9 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     private fun walMoveSlotQuery(slotName: String, lsn: String) : String {
         // no rights on this command in MDB:
         // return "SELECT pg_replication_slot_advance('$slotName', '${lsn}')"
-        return "SELECT pg_logical_slot_get_changes($slotName, $lsn, NULL," +
+        return "SELECT pg_logical_slot_get_changes('$slotName', '$lsn', NULL," +
                 "'include-xids', 'true'," +
+                "'include-timestamp', 'true'," +
                 "'actions', 'insert,update,delete'," +
                 "'include-lsn', 'true'," +
                 "'include-transaction', 'true')"
@@ -855,7 +857,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     private fun getCurrentLsn(connection: Connection, slotName: String): String? {
-        val peakOneChange = walCheckLsnQuery(slotName, "NULL")
+        val peakOneChange = walGetCommittedLsn(slotName)
         val stmt = connection.prepareStatement(peakOneChange)
         val getLsnResult = stmt.executeQuery()
         if (!getLsnResult.next()) {
@@ -864,17 +866,6 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         val lsn = getLsnResult.getString(1)
         getLsnResult.close()
         return lsn
-    }
-
-    private fun checkSlot(connection: Connection, slotName: String, lsn: String): Boolean {
-        val checkLsnQ = walCheckLsnQuery(slotName, lsn)
-        val stmt = connection.prepareStatement(checkLsnQ)
-        val checkResult = stmt.executeQuery()
-        if (!checkResult.next()) {
-            return false
-        }
-
-        return true
     }
 
     private fun forwardSlot(connection: Connection, slotName: String, beyondLsn: String) {
@@ -947,18 +938,24 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             }
 
                             val slotName = genSlotName(clientId)
-                            val lockLsnQ = walLockLsnQuery((slotName))
-                            val stmt = connection.prepareStatement(lockLsnQ)
-                            val lockResult = stmt.executeQuery()
-                            if (!lockResult.next()) {
+                            var lsnString: String? = getCurrentLsn(connection, slotName)
+                            if (lsnString == null) {
+                                // otherwise create it
+                                val lockLsnQ = walLockLsnQuery((slotName))
+                                val stmt = connection.prepareStatement(lockLsnQ)
+                                val lockResult = stmt.executeQuery()
+                                if (lockResult.next()) {
+                                    lsnString = lockResult.getString(1)
+                                }
+                                lockResult.close()
+                            }
+                            if (lsnString == null) {
                                 emit(mkBadRsp("cannot fix LSN: no LSN point provided"))
                                 return@collect
                             }
-                            val lsnAsString = lockResult.getString(1)
-                            lockResult.close()
 
                             // after creating slot, save it's LSN in the format of column
-                            val slotLsn = ColumnValue.newBuilder().setString(lsnAsString).build()
+                            val slotLsn = ColumnValue.newBuilder().setString(lsnString).build()
 
                             // you can identify allocated resources here, for instance,
                             // you may save slot name that was just created
@@ -981,8 +978,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // LSN persistance if user hasn't moves slot of replication.
                             val forLsn = req.streamCtlReq.checkLsnReq.lsn.lsn.string
                             val slotName = genSlotName(clientId)
-                            val hasData = this@PostgreSQL.checkSlot(connection, slotName, forLsn)
-                            if (!hasData) {
+                            val currentLsn = this@PostgreSQL.getCurrentLsn(connection, slotName)
+                            if (currentLsn != null) {
                                 emit(mkBadRsp("Slot has been lost because of no data: lsn=$forLsn"))
                                 return@collect
                             }
@@ -992,6 +989,13 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                         StreamCtlReq.CtlReqCase.REWIND_LSN_REQ -> {
                             val forLsn = req.streamCtlReq.rewindLsnReq.lsn
                             val slotName = genSlotName(clientId)
+                            // first things first, check slot:
+                            val currentLsn = this@PostgreSQL.getCurrentLsn(connection, slotName)
+                            if (currentLsn == null) {
+                                // slot has already been removed, return OK
+                                emit(mkRsp(RewindLsnRsp.newBuilder().build()))
+                                return@collect
+                            }
                             val deleteSlotQ = walDeleteSlotQuery(slotName)
                             val stmt = connection.prepareStatement(deleteSlotQ)
                             val lockResult = stmt.executeQuery()
@@ -1008,19 +1012,21 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val forLsn = changeReq.lsn.lsn.string
                             val slotName = genSlotName(clientId)
 
+                            val currentLsn = this@PostgreSQL.getCurrentLsn(connection, slotName)
+                            if (currentLsn == null) {
+                                emit(mkBadRsp("Slot has been lost"))
+                                return@collect
+                            }
                             // rewind LSN to committed position by client
                             forwardSlot(connection, slotName, forLsn)
                             // peak next change(changes) from stream
-                            val peakWalChangesReq = walPeakChangesQuery(slotName, forLsn, limit=1)
+                            val peakWalChangesReq = walPeakChangesQuery(slotName, limit=1)
                             val stmt = connection.prepareStatement(peakWalChangesReq)
                             val getChangesResult = stmt.executeQuery()
                             // expect only single result
                             if (getChangesResult.next()) {
                                 val lsn = getChangesResult.getString(1)
                                 val data = getChangesResult.getString(2)
-                                if (lsn != forLsn) {
-                                    return@collect
-                                }
 
                                 val wal2json = Klaxon().parse<Wal2JsonMessage>(data)
                                     ?: throw DtExtensionException("Wrong format of wal2json message")
@@ -1038,7 +1044,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 }
 
                                 // don't forget to send final message
-                                val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextLsn).build()
+                                val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextlsn).build()
                                 emit(mkRsp(
                                     StreamChangeRsp.newBuilder()
                                         .setCheckpoint(StreamChangeRsp.CheckPoint.newBuilder()
@@ -1051,7 +1057,16 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                         ) .build()
                                 )
                                 )
+                                return@collect
                             }
+                            // here also don't forget to send final message: just return the same LSN
+                            emit(mkRsp(
+                                StreamChangeRsp.newBuilder()
+                                    .setCheckpoint(StreamChangeRsp.CheckPoint.newBuilder()
+                                        .setLsn(changeReq.lsn)
+                                    ) .build()
+                            )
+                            )
                             getChangesResult.close()
 
                         }
@@ -1059,7 +1074,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             emit(mkBadRsp("no control item response"))
                     }
                 } catch (e: java.lang.Exception) {
-                    emit(mkBadRsp("exception occured: ${e.message}"))
+                    emit(mkBadRsp("exception occured: ${e.message}, stack trace: ${e.stackTraceToString()}"))
                 }
             }
         }
