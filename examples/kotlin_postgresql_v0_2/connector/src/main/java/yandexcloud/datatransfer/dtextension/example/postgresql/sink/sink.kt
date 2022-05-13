@@ -256,21 +256,8 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                         Write.WriteControlItemReq.ControlItemReqCase.BEGIN_SNAPSHOT_REQ -> {
                             val beginSnapshotReq = req.controlItemReq.beginSnapshotReq
                             val table = beginSnapshotReq.table
-                            when (beginSnapshotReq.cleanupType) {
-                                Write.WriteBeginSnapshotReq.CleanupType.DROP -> {
-                                    this@PostgresSink.dropTable(connection, table)
-                                    this@PostgresSink.createTable(connection, table)
-                                }
-                                Write.WriteBeginSnapshotReq.CleanupType.TRUNCATE -> {
-                                    this@PostgresSink.truncateTable(connection, table.namespace.namespace, table.name)
-                                }
-                                Write.WriteBeginSnapshotReq.CleanupType.CLEANUP_TYPE_UNSPECIFIED,
-                                Write.WriteBeginSnapshotReq.CleanupType.NONE,
-                                Write.WriteBeginSnapshotReq.CleanupType.UNRECOGNIZED,
-                                null -> {
-                                    // do nothing, because no drop table requested here
-                                }
-                            }
+                            this@PostgresSink.dropTable(connection, table)
+                            this@PostgresSink.createTable(connection, table)
                             val someState = "you may save here some state"
                             mkRsp(WriteBeginSnapshotRsp.newBuilder().setSnapshotState(
                                 ByteString.copyFromUtf8(someState)
