@@ -292,7 +292,7 @@ data class PostgresSourceParameters(
 )
 
 class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
-    private val specificationPath = "source_spec.json";
+    private val specificationPath = "/source_spec.json";
 
     private fun ValidateSpec(jsonSpec: String) {
         val specPath = javaClass.getResource(specificationPath)

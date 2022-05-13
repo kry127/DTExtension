@@ -35,7 +35,7 @@ data class PostgresSinkParameters(
 )
 
 class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
-    private val specificationPath = "sink_spec.json";
+    private val specificationPath = "/sink_spec.json";
 
     private fun ValidateSpec(jsonSpec: String) {
         val specPath = javaClass.getResource(specificationPath)
@@ -91,8 +91,8 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             ColumnType.COLUMN_TYPE_DECIMAL -> return columnValue.decimal.asString
             ColumnType.COLUMN_TYPE_BIG_DECIMAL -> return columnValue.bigDecimal
             ColumnType.COLUMN_TYPE_BIG_INTEGER -> return columnValue.bigInteger
-            ColumnType.COLUMN_TYPE_UNIX_TIME -> return "${columnValue.unixTime} ::TIMESTAMP WITH TIME ZONE"
-            ColumnType.COLUMN_TYPE_STRING -> return columnValue.string
+            ColumnType.COLUMN_TYPE_UNIX_TIME -> return "to_timestamp(${columnValue.unixTime}) AT TIME ZONE 'UTC'"
+            ColumnType.COLUMN_TYPE_STRING -> return "'${columnValue.string}'"
             ColumnType.COLUMN_TYPE_BINARY -> return columnValue.binary.toStringUtf8()
             ColumnType.COLUMN_TYPE_UNSPECIFIED,
             ColumnType.UNRECOGNIZED,
@@ -259,9 +259,9 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             this@PostgresSink.dropTable(connection, table)
                             this@PostgresSink.createTable(connection, table)
                             val someState = "you may save here some state"
-                            mkRsp(WriteBeginSnapshotRsp.newBuilder().setSnapshotState(
+                            emit(mkRsp(WriteBeginSnapshotRsp.newBuilder().setSnapshotState(
                                 ByteString.copyFromUtf8(someState)
-                            ).build())
+                            ).build()))
                         }
                         Write.WriteControlItemReq.ControlItemReqCase.DONE_SNAPSHOT_REQ -> {
                             val doneSnapshotReq = req.controlItemReq.doneSnapshotReq
