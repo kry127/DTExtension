@@ -43,14 +43,6 @@ message WriteItemRsp {}
 // can be used to initiate writing in temporary table, for example
 message WriteBeginSnapshotReq {
     Table table = 1;
-    CleanupType cleanup_type = 2;
-
-    enum CleanupType {
-        CLEANUP_TYPE_UNSPECIFIED = 0;
-        NONE = 1;
-        DROP = 2;
-        TRUNCATE = 3;
-    }
 }
 message WriteBeginSnapshotRsp {
     bytes snapshot_state = 2;
