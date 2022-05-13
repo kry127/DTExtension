@@ -1,10 +1,11 @@
-package yandexcloud.datatransfer.dtextension.example.postgresql
+package yandexcloud.datatransfer.dtextension.example.postgresql.source
 
 import com.beust.klaxon.Klaxon
 import com.google.protobuf.ByteString
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import net.pwall.json.schema.JSONSchema
+import yandexcloud.datatransfer.dtextension.example.postgresql.*
 import yandexcloud.datatransfer.dtextension.v0_2.Common
 import yandexcloud.datatransfer.dtextension.v0_2.Common.ColumnCursor
 import yandexcloud.datatransfer.dtextension.v0_2.Common.Cursor
@@ -23,17 +24,6 @@ import java.sql.ResultSet
 import java.util.*
 
 
-const val connectorId = "kry127.postgresql_example"
-
-// TODO make part of library?
-object RspUtil {
-    val resultOk: Common.Result = Common.Result.newBuilder().setOk(true).build()
-    fun resultError(error: String): Common.Result {
-        return Common.Result.newBuilder().setError(error).build()
-    }
-}
-
-class DtExtensionException(error: String) : Exception(error)
 
 object PsqlQueries {
     val pgSystemSchemas = listOf("pg_catalog", "information_schema")
@@ -295,14 +285,14 @@ data class Wal2JsonKeyChange(
     val keyvalues: List<Any>,
 )
 
-data class PostgreSQLParameters(
+data class PostgresSourceParameters(
     val jdbc_conn_string: String,
     val user: String,
     val password: String,
 )
 
-class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
-    private val specificationPath = "/spec.json";
+class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
+    private val specificationPath = "source_spec.json";
 
     private fun ValidateSpec(jsonSpec: String) {
         val specPath = javaClass.getResource(specificationPath)
@@ -318,7 +308,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     private fun connectToPostgreSQL(jsonSpec: String): Connection {
-        val parameters = Klaxon().parse<PostgreSQLParameters>(jsonSpec)
+        val parameters = Klaxon().parse<PostgresSourceParameters>(jsonSpec)
             ?: throw DtExtensionException("Parameters cannot be empty")
 
         return DriverManager.getConnection(parameters.jdbc_conn_string, parameters.user, parameters.password)
@@ -670,8 +660,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val initConnReq = req.readCtlReq.initReq
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
-                            this@PostgreSQL.ValidateSpec(initConnReq.jsonSettings)
-                            connection = this@PostgreSQL.connectToPostgreSQL(initConnReq.jsonSettings)
+                            this@PostgresSource.ValidateSpec(initConnReq.jsonSettings)
+                            connection = this@PostgresSource.connectToPostgreSQL(initConnReq.jsonSettings)
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         ReadCtlReq.CtlReqCase.CURSOR_REQ -> {
@@ -684,7 +674,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // commited
                             // and selection of pieces is happened as select statement
                             val cursorReq = req.readCtlReq.cursorReq
-                            val schema = this@PostgreSQL.schemaQuery(connection, namespace, name)
+                            val schema = this@PostgresSource.schemaQuery(connection, namespace, name)
 
                             val colName = cursorReq.preferredColumn
                             val keyCount = schema.columnsList.count { it.key }
@@ -731,9 +721,9 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // items in parquet format to be even more efficient
                             val readChangeReq = req.readCtlReq.readChangeReq
                             val cursor = readChangeReq.cursor
-                            val schema = this@PostgreSQL.schemaQuery(connection, namespace, name)
+                            val schema = this@PostgresSource.schemaQuery(connection, namespace, name)
                             // TODO rework delta extraction for cursor commitment
-                            val (changeItems, maxColumn) = this@PostgreSQL.getTableDeltaAsPlainRow(
+                            val (changeItems, maxColumn) = this@PostgresSource.getTableDeltaAsPlainRow(
                                 connection, cursor, namespace, name, schema, 1000
                             )
                             val columnCursor = cursor.columnCursor
@@ -795,7 +785,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             )
                         }
                         null, ReadCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
-                            emit(mkBadRsp("no control item response"))
+                            emit(mkBadRsp("no control item request sent"))
                     }
                 } catch (e: java.lang.Exception) {
                     emit(mkBadRsp("exception occured: ${e.message}; full: $e"))
@@ -916,8 +906,8 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val initConnReq = req.streamCtlReq.initReq
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
-                            this@PostgreSQL.ValidateSpec(initConnReq.jsonSettings)
-                            connection = this@PostgreSQL.connectToPostgreSQL(initConnReq.jsonSettings)
+                            this@PostgresSource.ValidateSpec(initConnReq.jsonSettings)
+                            connection = this@PostgresSource.connectToPostgreSQL(initConnReq.jsonSettings)
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         StreamCtlReq.CtlReqCase.FIX_LSN_REQ -> {
@@ -967,7 +957,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                         .setLsn(Lsn.newBuilder()
                                             .setReplicationState(replicationState)
                                             .setStreamSource(clusterSource)
-                                            .setLsn(slotLsn)
+                                            .setLsnValue(slotLsn)
                                         )
                                         .build()
                                 )
@@ -976,9 +966,9 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                         StreamCtlReq.CtlReqCase.CHECK_LSN_REQ -> {
                             // normally, we should check if LSN still here, but PostgreSQL guarantees
                             // LSN persistance if user hasn't moves slot of replication.
-                            val forLsn = req.streamCtlReq.checkLsnReq.lsn.lsn.string
+                            val forLsn = req.streamCtlReq.checkLsnReq.lsn.lsnValue.string
                             val slotName = genSlotName(clientId)
-                            val currentLsn = this@PostgreSQL.getCurrentLsn(connection, slotName)
+                            val currentLsn = this@PostgresSource.getCurrentLsn(connection, slotName)
                             if (currentLsn != null) {
                                 emit(mkBadRsp("Slot has been lost because of no data: lsn=$forLsn"))
                                 return@collect
@@ -990,7 +980,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val forLsn = req.streamCtlReq.rewindLsnReq.lsn
                             val slotName = genSlotName(clientId)
                             // first things first, check slot:
-                            val currentLsn = this@PostgreSQL.getCurrentLsn(connection, slotName)
+                            val currentLsn = this@PostgresSource.getCurrentLsn(connection, slotName)
                             if (currentLsn == null) {
                                 // slot has already been removed, return OK
                                 emit(mkRsp(RewindLsnRsp.newBuilder().build()))
@@ -1009,10 +999,10 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                         }
                         StreamCtlReq.CtlReqCase.STREAM_CHANGE_REQ -> {
                             val changeReq = req.streamCtlReq.streamChangeReq
-                            val forLsn = changeReq.lsn.lsn.string
+                            val forLsn = changeReq.lsn.lsnValue.string
                             val slotName = genSlotName(clientId)
 
-                            val currentLsn = this@PostgreSQL.getCurrentLsn(connection, slotName)
+                            val currentLsn = this@PostgresSource.getCurrentLsn(connection, slotName)
                             if (currentLsn == null) {
                                 emit(mkBadRsp("Slot has been lost"))
                                 return@collect
@@ -1052,7 +1042,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                             .setLsn(
                                                 Lsn.newBuilder()
                                                     .setStreamSource(clusterSource)
-                                                    .setLsn(nextLsnCol)
+                                                    .setLsnValue(nextLsnCol)
                                             )
                                         ) .build()
                                 )
@@ -1071,7 +1061,7 @@ class PostgreSQL : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
                         }
                         null, StreamCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
-                            emit(mkBadRsp("no control item response"))
+                            emit(mkBadRsp("no control item request sent"))
                     }
                 } catch (e: java.lang.Exception) {
                     emit(mkBadRsp("exception occured: ${e.message}, stack trace: ${e.stackTraceToString()}"))

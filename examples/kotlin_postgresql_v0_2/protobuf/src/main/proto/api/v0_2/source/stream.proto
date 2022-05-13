@@ -80,7 +80,7 @@ message StreamSource {
 // LSN is defined by source from where LSN is dragged and value of LSN itself
 message Lsn {
     StreamSource stream_source = 1;
-    ColumnValue lsn = 2;
+    ColumnValue lsn_value = 2;
     // this is an optional field associated with LSN allocation if source have to store some additional info for fixing LSN position
     bytes replication_state = 3;
 }
@@ -104,6 +104,8 @@ message CheckLsnRsp {
 }
 
 // This message rewinds LSN (e.g. makes it no longer fixed to a certain point)
+// note, that 'lsn_value' field of Lsn message is optional: client may not know what to reset after restart,
+// but service should identify stream by other parameters provided by LSN message
 message RewindLsnReq {
     Lsn lsn = 1;
 }

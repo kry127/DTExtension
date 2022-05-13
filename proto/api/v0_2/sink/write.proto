@@ -10,33 +10,34 @@ import "api/v0_2/data.proto";
 // Control item requests for snapshot process
 message WriteControlItemReq {
     oneof control_item_req {
-        InitReq init_connection_req = 1;
-        WriteDataItemReq data_item_req = 2;
+        InitReq init_req = 1;
+        WriteItemReq item_req = 2;
         WriteBeginSnapshotReq begin_snapshot_req = 3;
         WriteDoneSnapshotReq done_snapshot_req = 4;
-        WriteStartTransactionReq write_start_transaction_req = 5;
-        WriteStopTransactionReq write_stop_transaction_req = 6;
     }
 }
 
 // Control item response for snapshot process
 message WriteControlItemRsp {
     oneof control_item_rsp {
-        InitRsp init_connection_rsp = 1;
-        WriteDataItemRsp data_item_rsp = 2;
+        InitRsp init_rsp = 1;
+        WriteItemRsp item_rsp = 2;
         WriteBeginSnapshotRsp begin_snapshot_rsp = 3;
         WriteDoneSnapshotRsp done_snapshot_rsp = 4;
-        WriteStartTransactionRsp write_start_transaction_rsp = 5;
-        WriteStopTransactionRsp write_stop_transaction_rsp = 6;
     }
 }
 
 
 // This message writes data change item
-message WriteDataItemReq {
-    ChangeItem change_item = 2;
+message WriteItemReq {
+    oneof write_item_req {
+        ChangeItem change_item = 1;
+        CheckPoint check_point = 2;
+    }
+
+    message CheckPoint {}
 }
-message WriteDataItemRsp {}
+message WriteItemRsp {}
 
 // Indicates the begginning of the snapshot progress for table
 // can be used to initiate writing in temporary table, for example
@@ -63,10 +64,3 @@ message WriteDoneSnapshotReq {
 }
 message WriteDoneSnapshotRsp {}
 
-// This message identifies beginning of the transaction
-message WriteStartTransactionReq {}
-message WriteStartTransactionRsp {}
-
-// This message identifies the end of the transaction
-message WriteStopTransactionReq {}
-message WriteStopTransactionRsp {}
