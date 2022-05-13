@@ -4,7 +4,7 @@ import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
 
 fun main() {
-    val port = 26926
+    val port = 26927
     // start sink service
     val server = ServerBuilder.forPort(port)
         .addService(PostgresSink())
