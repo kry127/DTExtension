@@ -28,13 +28,25 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.util.*
 
-data class PostgresSinkParameters(
+enum class CleanupPolicy { DROP, TRUNCATE, DISABLED }
+
+data class PostgresSinkParameters (
     val jdbc_conn_string: String,
     val user: String,
     val password: String,
-    val transactional_snapshot: Boolean = false,
-    val transactional_stream: Boolean = false,
-)
+    val transactionalSnapshot: Boolean = false,
+    val transactionalStream: Boolean = false,
+    val cleanupPolicy: String = "disabled",
+) {
+    fun getCleanupPolicy() : CleanupPolicy {
+        return when (cleanupPolicy.lowercase()) {
+            "drop" -> return CleanupPolicy.DROP
+            "truncate" -> return CleanupPolicy.TRUNCATE
+            "disabled" -> return CleanupPolicy.DISABLED
+            else -> return CleanupPolicy.DISABLED
+        }
+    }
+}
 
 class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
     private val specificationPath = "/sink_spec.json";
@@ -112,6 +124,24 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         }
     }
 
+    private fun tableExists(conn: Connection, table: Table) : Boolean {
+        val namespace = table.namespace.namespace
+        val name = table.name
+        val query = """
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables
+                    WHERE  table_schema = 'public'
+                    AND    table_name   = '"$namespace"."$name"'
+            );""".trimIndent()
+        conn.prepareStatement(query).use {
+            val result = it.executeQuery()
+            if (!result.next()) {
+                return false
+            }
+            return true
+        }
+    }
+
     private fun createTable(conn: Connection, table: Table) {
         val namespace = table.namespace.namespace
         val name = table.name
@@ -129,8 +159,10 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         stmt.execute()
     }
 
-    private fun truncateTable(conn: Connection, schema: String, table: String) {
-        val query = "DELETE FROM \"$schema\".\"$table\";"
+    private fun truncateTable(conn: Connection, table: Table) {
+        val namespace = table.namespace.namespace
+        val name = table.name
+        val query = "DELETE FROM \"$namespace\".\"$name\";"
         val stmt = conn.prepareStatement(query)
         stmt.execute()
     }
@@ -241,7 +273,9 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             // or if you write completely stateless connector, you may ignore clientId at all
             lateinit var clientId: String
             // identifies if stream of change items should be transactional
-            var transactional_stream = false
+            var transactionalStream = false
+            // identifies cleanup policy
+            var cleanupPolicy = CleanupPolicy.DISABLED
 
             requests.collect { req ->
                 try {
@@ -255,14 +289,23 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             val parameters = Klaxon().parse<PostgresSinkParameters>(initConnReq.jsonSettings)
                                 ?: throw DtExtensionException("Parameters cannot be empty")
                             connection = this@PostgresSink.connectToPostgreSQL(parameters)
-                            transactional_stream = parameters.transactional_stream
+                            transactionalStream = parameters.transactionalStream
+                            cleanupPolicy = parameters.getCleanupPolicy()
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         Write.WriteControlItemReq.ControlItemReqCase.BEGIN_SNAPSHOT_REQ -> {
                             val beginSnapshotReq = req.controlItemReq.beginSnapshotReq
                             val table = beginSnapshotReq.table
-                            this@PostgresSink.dropTable(connection, table)
-                            this@PostgresSink.createTable(connection, table)
+                            when (cleanupPolicy) {
+                                CleanupPolicy.DROP -> {
+                                    this@PostgresSink.dropTable(connection, table)
+                                }
+                                CleanupPolicy.TRUNCATE -> this@PostgresSink.truncateTable(connection, table)
+                                else -> Unit // Do nothing
+                            }
+                            if (this@PostgresSink.tableExists(connection, table)) {
+                                this@PostgresSink.createTable(connection, table)
+                            }
                             val someState = "you may save here some state"
                             emit(mkRsp(WriteBeginSnapshotRsp.newBuilder().setSnapshotState(
                                 ByteString.copyFromUtf8(someState)
@@ -273,12 +316,13 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             // do nothing special in this sink implementation
                             val restoredState = doneSnapshotReq.snapshotState.toStringUtf8()
                             println("Restored state on Done Snapshot: $restoredState")
+                            emit(mkRsp(WriteDoneSnapshotRsp.getDefaultInstance()))
                         }
                         Write.WriteControlItemReq.ControlItemReqCase.ITEM_REQ -> {
                             val dataItemReq = req.controlItemReq.itemReq
                             when (dataItemReq.writeItemReqCase) {
                                 Write.WriteItemReq.WriteItemReqCase.CHANGE_ITEM -> {
-                                    if (transactional_stream) {
+                                    if (transactionalStream) {
                                         if (connection.autoCommit) {
                                             // turn off auto commit to manually commit on checkpoint
                                             connection.autoCommit = false;
@@ -297,7 +341,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                                     }
                                 }
                                 Write.WriteItemReq.WriteItemReqCase.CHECK_POINT -> {
-                                    if (transactional_stream) {
+                                    if (transactionalStream) {
                                         // this is a transaction border fo sequence of sent CHANGE_ITEM messages
                                         // reply with responce here to notify client that we are ready to accept next transaction
                                         connection.autoCommit = true // implicitly commits transaction

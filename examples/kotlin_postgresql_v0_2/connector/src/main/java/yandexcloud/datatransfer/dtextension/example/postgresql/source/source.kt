@@ -214,18 +214,35 @@ data class Wal2JsonChange(
         }
         when (pgTypeTrim) {
             "timestamp without time zone", "timestamp with time zone", "time without time zone", "time with time zone", "date"
-            -> return columnBuilder.setUnixTime(columnValue as Long).build()
+            -> {
+                when (columnValue) {
+                    is Long -> return columnBuilder.setUnixTime(columnValue).build()
+                    is Int  -> return columnBuilder.setUnixTime(columnValue.toLong()).build()
+                    is String -> {
+                        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSS")
+                        return columnBuilder.setUnixTime(sdf.parse(columnValue).time / 1000).build()
+                    }
+                    else -> throw DtExtensionException("Couldn't parse date: $columnValue")
+                }
+            }
             "uuid", "name", "text", "interval", "char", "abstime", "money"
             -> return columnBuilder.setString(columnValue.toString()).build()
             "boolean" -> return columnBuilder.setBool(columnValue as Boolean).build()
-            "bigint" -> return columnBuilder.setInt64(columnValue as Long).build()
+            "bigint" -> {
+                when (columnValue) {
+                    is Long -> return columnBuilder.setInt64(columnValue).build()
+                    is Int -> return columnBuilder.setInt64(columnValue.toLong()).build()
+                    else -> throw DtExtensionException("Couldn't build bigint: $columnValue")
+                }
+
+            }
             "integer", "smallint" -> return columnBuilder.setInt32(columnValue as Int).build()
-            "numeric", "real", "double precision" -> return columnBuilder.setBigDecimal(columnValue as String).build()
-            "bytea", "bit", "bit varying" -> columnBuilder.setBinary(ByteString.copyFromUtf8(columnValue as String)).build()
-            "json", "jsonb" -> return columnBuilder.setJson(columnValue as String).build()
+            "numeric", "real", "double precision" -> return columnBuilder.setBigDecimal("$columnValue").build()
+            "bytea", "bit", "bit varying" -> columnBuilder.setBinary(ByteString.copyFromUtf8("$columnValue")).build()
+            "json", "jsonb" -> return columnBuilder.setJson("$columnValue").build()
             "daterange", "int4range", "int8range", "numrange", "point", "tsrange",
             "tstzrange", "xml", "inet", "cidr", "macaddr", "oid" ->
-                return columnBuilder.setString(columnValue as String).build()
+                return columnBuilder.setString("$columnValue").build()
             else -> return columnBuilder.setString(columnValue.toString()).build()
         }
         return columnBuilder.build()
@@ -353,32 +370,20 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     private fun extractMaxColumnInWindow(
-        cursor: ColumnCursor, namespace: String, name: String, window: Int) : String{
-        val whereClause = cursor.dataRange.from?.let {
-            if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
-                null
-            } else if (cursor.dataRange.excludeFrom) {
-                "\"${cursor.column.name}\" > ${columnValueAsSqlString(it)}"
-            } else {
-                "\"${cursor.column.name}\" >= ${columnValueAsSqlString(it)}"
-            }
-        } ?.let { "WHERE $it"} ?: ""
+        cursor: ColumnCursor, namespace: String, name: String, window: Int) : String {
+        val where = buildWhere(cursor)
         return """
             SELECT max("${cursor.column.name}")
             FROM (
               SELECT "${cursor.column.name}"
               FROM "$namespace"."$name"
-              $whereClause
+              WHERE $where
               LIMIT $window
             ) as sq;
             """
     }
 
-    private fun deltaTableQuery(
-        cursor: ColumnCursor, namespace: String, name: String,
-        schema: Schema
-    ): String {
-        val columnList = schema.columnsList.joinToString { "\"${it.name}\"" }
+    private fun buildWhere(cursor: ColumnCursor): String {
         val leftWhere = cursor.dataRange.from?.let {
             if (it.dataCase == ColumnValue.DataCase.DATA_NOT_SET) {
                 null
@@ -397,12 +402,21 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 "AND \"${cursor.column.name}\" <= ${columnValueAsSqlString(it)}"
             }
         } ?: ""
+        return """1=1
+            $leftWhere
+            $rightWhere"""
+    }
+
+    private fun deltaTableQuery(
+        cursor: ColumnCursor, namespace: String, name: String,
+        schema: Schema
+    ): String {
+        val columnList = schema.columnsList.joinToString { "\"${it.name}\"" }
+        val where = buildWhere(cursor)
         val query = """
             SELECT $columnList
             FROM "$namespace"."$name"
-            WHERE 1=1
-            $leftWhere
-            $rightWhere
+            WHERE $where
             ORDER BY ${cursor.column.name} ${
             if (cursor.descending) {
                 "desc"
