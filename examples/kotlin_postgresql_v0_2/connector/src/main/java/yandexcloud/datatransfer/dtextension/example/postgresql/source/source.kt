@@ -318,35 +318,34 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         val schemaQuery = connection.prepareStatement(PsqlQueries.listTableSchemaQuery())
         schemaQuery.setString(1, namespace)
         schemaQuery.setString(2, name)
-        val schemaResult = schemaQuery.executeQuery()
-
         val columns = mutableMapOf<String, Column.Builder>()
-        while (schemaResult.next()) {
-            val columnName = schemaResult.getString(1)
-            val dataType = schemaResult.getString(2)
+        schemaQuery.executeQuery().use {schemaResult ->
+            while (schemaResult.next()) {
+                val columnName = schemaResult.getString(1)
+                val dataType = schemaResult.getString(2)
 
-            columns[columnName] = Column.newBuilder()
-                .setName(columnName)
-                .setType(PsqlQueries.parsePgType(dataType))
-                .setOriginalType(
-                    Column.OriginalType.newBuilder()
-                        .setConnectorId(connectorId)
-                        .setTypeName(dataType)
-                        .build()
-                )
+                columns[columnName] = Column.newBuilder()
+                    .setName(columnName)
+                    .setType(PsqlQueries.parsePgType(dataType))
+                    .setOriginalType(
+                        Column.OriginalType.newBuilder()
+                            .setConnectorId(connectorId)
+                            .setTypeName(dataType)
+                            .build()
+                    )
+            }
         }
-        schemaResult.close()
 
 
         val pkeyQuery = connection.prepareStatement(PsqlQueries.queryTableKey())
         pkeyQuery.setString(1, namespace)
         pkeyQuery.setString(2, name)
-        val pkeyQueryResult = pkeyQuery.executeQuery()
-        while (pkeyQueryResult.next()) {
-            val columnName = pkeyQueryResult.getString(3)
-            columns[columnName]?.key = true
+        pkeyQuery.executeQuery().use { pkeyQueryResult ->
+            while (pkeyQueryResult.next()) {
+                val columnName = pkeyQueryResult.getString(3)
+                columns[columnName]?.key = true
+            }
         }
-        pkeyQueryResult.close()
 
         return Schema.newBuilder()
             .addAllColumns(columns.map { it.value.build() })
@@ -480,33 +479,34 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     ): Cursor {
         val query = "SELECT min(\"${column.name}\"), max(\"${column.name}\") FROM \"${namespace}\".\"${name}\""
         val stmt = connection.prepareStatement(query)
-        val result = stmt.executeQuery()
 
+        stmt.executeQuery().use{result ->
+            if (!result.next()) {
+                throw DtExtensionException("Cannot get min/max for column: empty result set")
+            }
+            if (result.getObject(1) == null) {
+                // no actual data range: make end cursor
+                return Cursor.newBuilder().setEndCursor(
+                    EndCursor.getDefaultInstance()
+                ).build()
+            }
+            val rangeMin = this.getColumnValue(result, 1, column.type)
+            val rangeMax = this.getColumnValue(result, 2, column.type)
 
-        if (!result.next()) {
-            throw DtExtensionException("Cannot get min/max for column: empty result set")
-        }
-        if (result.getObject(1) == null) {
-            // no actual data range: make end cursor
-            return Cursor.newBuilder().setEndCursor(
-                EndCursor.getDefaultInstance()
+            return Cursor.newBuilder().setColumnCursor(
+                ColumnCursor.newBuilder()
+                    .setColumn(column)
+                    .setDataRange(
+                        Common.DataRange.newBuilder()
+                            .setFrom(rangeMin)
+                            .setTo(rangeMax)
+                            .build()
+                    )
+                    // NOTE: we are setting ascending cursor, so client would like to see lower values first
+                    .setDescending(false)
+                    .build()
             ).build()
         }
-        val rangeMin = this.getColumnValue(result, 1, column.type)
-        val rangeMax = this.getColumnValue(result, 2, column.type)
-        return Cursor.newBuilder().setColumnCursor(
-            ColumnCursor.newBuilder()
-                .setColumn(column)
-                .setDataRange(
-                    Common.DataRange.newBuilder()
-                        .setFrom(rangeMin)
-                        .setTo(rangeMax)
-                        .build()
-                )
-                // NOTE: we are setting ascending cursor, so client would like to see lower values first
-                .setDescending(false)
-                .build()
-        ).build()
     }
 
     // TODO make analogue with parquet
@@ -523,12 +523,12 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         // desired window size
         val maxWindowQuery = extractMaxColumnInWindow(columnCursor, namespace, name, window)
         val maxWindowStmt = connection.prepareStatement(maxWindowQuery)
-        val maxWindowResult = maxWindowStmt.executeQuery()
-        if (!maxWindowResult.next()) {
-            throw DtExtensionException("max aggregaion should contain at least one value")
+        val maxColumnValue = maxWindowStmt.executeQuery().use { maxWindowResult ->
+            if (!maxWindowResult.next()) {
+                throw DtExtensionException("max aggregaion should contain at least one value")
+            }
+            getColumnValue(maxWindowResult, 1, columnCursor.column.type)
         }
-        val maxColumnValue = getColumnValue(maxWindowResult, 1, columnCursor.column.type)
-        maxWindowResult.close()
 
         // we calculated c, the next step is to guarantee, that whole interval [a, c] will be transfered
         val deltaCursor = columnCursor.toBuilder().setDataRange(
@@ -537,19 +537,18 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
         val query = deltaTableQuery(deltaCursor, namespace, name, schema)
         val stmt = connection.prepareStatement(query)
-        val result = stmt.executeQuery()
-
-        val changeItemList = mutableListOf<PlainRow>()
-        while (result.next()) {
-            val rowBuilder = PlainRow.newBuilder()
-            for (id in 0 until result.metaData.columnCount) {
-                val value = getColumnValue(result, id + 1, schema.columnsList.get(id).type)
-                rowBuilder.addValues(value)
+        stmt.executeQuery().use { result ->
+            val changeItemList = mutableListOf<PlainRow>()
+            while (result.next()) {
+                val rowBuilder = PlainRow.newBuilder()
+                for (id in 0 until result.metaData.columnCount) {
+                    val value = getColumnValue(result, id + 1, schema.columnsList.get(id).type)
+                    rowBuilder.addValues(value)
+                }
+                changeItemList.add(rowBuilder.build())
             }
-            changeItemList.add(rowBuilder.build())
+            return Pair(changeItemList, maxColumnValue)
         }
-        result.close()
-        return Pair(changeItemList, maxColumnValue)
     }
 
     override suspend fun spec(request: Common.SpecReq): Common.SpecRsp {
@@ -584,25 +583,24 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             val query = connection
                 .prepareStatement(PsqlQueries.listTablesQuery("*"))
 
-            val result = query.executeQuery()
-
             val tables = mutableListOf<Table>()
 
-            while (result.next()) {
-                val namespace = result.getString(1)
-                val name = result.getString(2)
+            query.executeQuery().use { result ->
+                while (result.next()) {
+                    val namespace = result.getString(1)
+                    val name = result.getString(2)
 
-                // retrieve schema for each table
-                val schema = this.schemaQuery(connection, namespace, name)
-                tables.add(
-                    Table.newBuilder()
-                        .setNamespace(Namespace.newBuilder().setNamespace(namespace))
-                        .setName(name)
-                        .setSchema(schema)
-                        .build()
-                )
+                    // retrieve schema for each table
+                    val schema = this.schemaQuery(connection, namespace, name)
+                    tables.add(
+                        Table.newBuilder()
+                            .setNamespace(Namespace.newBuilder().setNamespace(namespace))
+                            .setName(name)
+                            .setSchema(schema)
+                            .build()
+                    )
+                }
             }
-            result.close()
 
             return SourceServiceOuterClass.DiscoverRsp.newBuilder()
                 .setResult(RspUtil.resultOk)
@@ -846,20 +844,18 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     private fun getCurrentLsn(connection: Connection, slotName: String): String? {
         val peakOneChange = walGetCommittedLsn(slotName)
         val stmt = connection.prepareStatement(peakOneChange)
-        val getLsnResult = stmt.executeQuery()
-        if (!getLsnResult.next()) {
-            return null
+        stmt.executeQuery().use { getLsnResult ->
+            if (!getLsnResult.next()) {
+                return null
+            }
+            return getLsnResult.getString(1)
         }
-        val lsn = getLsnResult.getString(1)
-        getLsnResult.close()
-        return lsn
     }
 
     private fun forwardSlot(connection: Connection, slotName: String, beyondLsn: String) {
         val moveLsnQ = walMoveSlotQuery(slotName, beyondLsn)
         val stmt = connection.prepareStatement(moveLsnQ)
-        val moveResult = stmt.executeQuery()
-        moveResult.close()
+        stmt.executeQuery().use {  }
     }
 
     override fun stream(requests: Flow<SourceServiceOuterClass.StreamReq>): Flow<StreamRsp> {
@@ -930,11 +926,11 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 // otherwise create it
                                 val lockLsnQ = walLockLsnQuery((slotName))
                                 val stmt = connection.prepareStatement(lockLsnQ)
-                                val lockResult = stmt.executeQuery()
-                                if (lockResult.next()) {
-                                    lsnString = lockResult.getString(1)
+                                stmt.executeQuery().use { lockResult ->
+                                    if (lockResult.next()) {
+                                        lsnString = lockResult.getString(1)
+                                    }
                                 }
-                                lockResult.close()
                             }
                             if (lsnString == null) {
                                 emit(mkBadRsp("cannot fix LSN: no LSN point provided"))
@@ -985,12 +981,12 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             }
                             val deleteSlotQ = walDeleteSlotQuery(slotName)
                             val stmt = connection.prepareStatement(deleteSlotQ)
-                            val lockResult = stmt.executeQuery()
-                            if (!lockResult.next()) {
-                                emit(mkBadRsp("cannot remove LSN: empty result set"))
-                                return@collect
+                            stmt.executeQuery().use { lockResult ->
+                                if (!lockResult.next()) {
+                                    emit(mkBadRsp("cannot remove LSN: empty result set"))
+                                    return@collect
+                                }
                             }
-                            lockResult.close()
                             // emit OK otherwise
                             emit(mkRsp(RewindLsnRsp.newBuilder().build()))
                         }
@@ -1009,53 +1005,52 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // peak next change(changes) from stream
                             val peakWalChangesReq = walPeakChangesQuery(slotName, limit=1)
                             val stmt = connection.prepareStatement(peakWalChangesReq)
-                            val getChangesResult = stmt.executeQuery()
-                            // expect only single result
-                            if (getChangesResult.next()) {
-                                val lsn = getChangesResult.getString(1)
-                                val data = getChangesResult.getString(2)
+                            stmt.executeQuery().use { getChangesResult ->
+                                // expect only single result
+                                if (getChangesResult.next()) {
+                                    val lsn = getChangesResult.getString(1)
+                                    val data = getChangesResult.getString(2)
 
-                                val wal2json = Klaxon().parse<Wal2JsonMessage>(data)
-                                    ?: throw DtExtensionException("Wrong format of wal2json message")
+                                    val wal2json = Klaxon().parse<Wal2JsonMessage>(data)
+                                        ?: throw DtExtensionException("Wrong format of wal2json message")
 
-                                wal2json.getDataChangeItems().forEach {
-                                    emit(
-                                        mkRsp(
-                                            StreamChangeRsp.newBuilder()
-                                                .setChangeItem(
-                                                    ChangeItem.newBuilder().setDataChangeItem(it)
-                                                )
-                                                .build()
+                                    wal2json.getDataChangeItems().forEach {
+                                        emit(
+                                            mkRsp(
+                                                StreamChangeRsp.newBuilder()
+                                                    .setChangeItem(
+                                                        ChangeItem.newBuilder().setDataChangeItem(it)
+                                                    )
+                                                    .build()
+                                            )
                                         )
-                                    )
-                                }
+                                    }
 
-                                // don't forget to send final message
-                                val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextlsn).build()
+                                    // don't forget to send final message
+                                    val nextLsnCol = ColumnValue.newBuilder().setString(wal2json.nextlsn).build()
+                                    emit(mkRsp(
+                                        StreamChangeRsp.newBuilder()
+                                            .setCheckpoint(StreamChangeRsp.CheckPoint.newBuilder()
+                                                .setUnixCommitTime(wal2json.unixTimestamp())
+                                                .setLsn(
+                                                    Lsn.newBuilder()
+                                                        .setStreamSource(clusterSource)
+                                                        .setLsnValue(nextLsnCol)
+                                                )
+                                            ) .build()
+                                    )
+                                    )
+                                    return@collect
+                                }
+                                // here also don't forget to send final message: just return the same LSN
                                 emit(mkRsp(
                                     StreamChangeRsp.newBuilder()
                                         .setCheckpoint(StreamChangeRsp.CheckPoint.newBuilder()
-                                            .setUnixCommitTime(wal2json.unixTimestamp())
-                                            .setLsn(
-                                                Lsn.newBuilder()
-                                                    .setStreamSource(clusterSource)
-                                                    .setLsnValue(nextLsnCol)
-                                            )
+                                            .setLsn(changeReq.lsn)
                                         ) .build()
                                 )
                                 )
-                                return@collect
                             }
-                            // here also don't forget to send final message: just return the same LSN
-                            emit(mkRsp(
-                                StreamChangeRsp.newBuilder()
-                                    .setCheckpoint(StreamChangeRsp.CheckPoint.newBuilder()
-                                        .setLsn(changeReq.lsn)
-                                    ) .build()
-                            )
-                            )
-                            getChangesResult.close()
-
                         }
                         null, StreamCtlReq.CtlReqCase.CTLREQ_NOT_SET ->
                             emit(mkBadRsp("no control item request sent"))
