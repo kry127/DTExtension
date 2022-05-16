@@ -32,6 +32,8 @@ data class PostgresSinkParameters(
     val jdbc_conn_string: String,
     val user: String,
     val password: String,
+    val transactional_snapshot: Boolean = false,
+    val transactional_stream: Boolean = false,
 )
 
 class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
@@ -50,11 +52,8 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         // TODO add extra validation if needed
     }
 
-    private fun connectToPostgreSQL(jsonSpec: String): Connection {
-        val parameters = Klaxon().parse<PostgresSinkParameters>(jsonSpec)
-            ?: throw DtExtensionException("Parameters cannot be empty")
-
-        return DriverManager.getConnection(parameters.jdbc_conn_string, parameters.user, parameters.password)
+    private fun connectToPostgreSQL(params: PostgresSinkParameters): Connection {
+        return DriverManager.getConnection(params.jdbc_conn_string, params.user, params.password)
     }
 
     private fun toPostgreSQLType(colType : ColumnType): String {
@@ -91,7 +90,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             ColumnType.COLUMN_TYPE_DECIMAL -> return columnValue.decimal.asString
             ColumnType.COLUMN_TYPE_BIG_DECIMAL -> return columnValue.bigDecimal
             ColumnType.COLUMN_TYPE_BIG_INTEGER -> return columnValue.bigInteger
-            ColumnType.COLUMN_TYPE_UNIX_TIME -> return "to_timestamp(${columnValue.unixTime}) AT TIME ZONE 'UTC'"
+            ColumnType.COLUMN_TYPE_UNIX_TIME -> return "to_timestamp(${columnValue.unixTime}) :: timestamp AT TIME ZONE 'UTC'"
             ColumnType.COLUMN_TYPE_STRING -> return "'${columnValue.string}'"
             ColumnType.COLUMN_TYPE_BINARY -> return columnValue.binary.toStringUtf8()
             ColumnType.COLUMN_TYPE_UNSPECIFIED,
@@ -241,6 +240,8 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             // note, that you can use clientId to persist resources in database for particular client,
             // or if you write completely stateless connector, you may ignore clientId at all
             lateinit var clientId: String
+            // identifies if stream of change items should be transactional
+            var transactional_stream = false
 
             requests.collect { req ->
                 try {
@@ -250,7 +251,11 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
                             this@PostgresSink.ValidateSpec(initConnReq.jsonSettings)
-                            connection = this@PostgresSink.connectToPostgreSQL(initConnReq.jsonSettings)
+                            // parse params
+                            val parameters = Klaxon().parse<PostgresSinkParameters>(initConnReq.jsonSettings)
+                                ?: throw DtExtensionException("Parameters cannot be empty")
+                            connection = this@PostgresSink.connectToPostgreSQL(parameters)
+                            transactional_stream = parameters.transactional_stream
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         Write.WriteControlItemReq.ControlItemReqCase.BEGIN_SNAPSHOT_REQ -> {
@@ -273,6 +278,12 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             val dataItemReq = req.controlItemReq.itemReq
                             when (dataItemReq.writeItemReqCase) {
                                 Write.WriteItemReq.WriteItemReqCase.CHANGE_ITEM -> {
+                                    if (transactional_stream) {
+                                        if (connection.autoCommit) {
+                                            // turn off auto commit to manually commit on checkpoint
+                                            connection.autoCommit = false;
+                                        }
+                                    }
                                     // no response needed here, but we need to store change item in a database
                                     when (dataItemReq.changeItem.changeItemCase) {
                                         Data.ChangeItem.ChangeItemCase.DATA_CHANGE_ITEM ->  {
@@ -286,8 +297,11 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                                     }
                                 }
                                 Write.WriteItemReq.WriteItemReqCase.CHECK_POINT -> {
-                                    // this is a transaction border fo sequence of sent CHANGE_ITEM messages
-                                    // reply with responce here to notify client that we are ready to accept next transaction
+                                    if (transactional_stream) {
+                                        // this is a transaction border fo sequence of sent CHANGE_ITEM messages
+                                        // reply with responce here to notify client that we are ready to accept next transaction
+                                        connection.autoCommit = true // implicitly commits transaction
+                                    }
                                     emit(mkRsp(WriteItemRsp.getDefaultInstance()))
                                 }
                                 null, Write.WriteItemReq.WriteItemReqCase.WRITEITEMREQ_NOT_SET ->

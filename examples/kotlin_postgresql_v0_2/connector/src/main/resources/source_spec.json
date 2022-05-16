@@ -33,6 +33,18 @@
       "examples": [
         "password"
       ]
+    },
+    "transactional_snapshot": {
+      "title": "Transactional snapshot",
+      "type": "boolean",
+      "default": false,
+      "examples": [true]
+    },
+    "transactional_stream": {
+      "title": "Transactional stream",
+      "type": "boolean",
+      "default": false,
+      "examples": [false]
     }
   },
   "examples": [{

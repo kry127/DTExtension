@@ -1,5 +1,6 @@
 package yandexcloud.datatransfer.dtextension.example.postgresql.source
 
+import java.lang.Long.min
 import java.sql.Connection
 import java.sql.DriverManager
 import kotlin.math.max
@@ -43,12 +44,24 @@ fun checkTableExists(connection: Connection, table: String) : Boolean {
                     WHERE  table_schema = 'public'
                     AND    table_name   = '$table'
             );""".trimIndent()
-    val stmt = connection.prepareStatement(query)
-    val result = stmt.executeQuery()
-    if (result.next()) {
-        return result.getBoolean(1)
+    connection.prepareStatement(query).use {
+        val result = it.executeQuery()
+        if (!result.next()) {
+            return false
+        }
+        return true
     }
-    return false
+}
+
+fun checkTableIsEmpty(connection: Connection, table: String) : Boolean {
+    val query = """SELECT count(*) FROM "public"."$table";"""
+    connection.prepareStatement(query).use {
+        val result = it.executeQuery()
+        if (!result.next()) {
+            return true
+        }
+        return result.getLong(1) == 0L
+    }
 }
 
 fun getMaxId(connection: Connection, table: String) : Long {
@@ -119,8 +132,14 @@ fun main() {
     val user = "user"
     val password = "DTExtension"
     val table = "example"
-    val delta = 10000L
-    val sleepInMilliseconds = 0L
+    // for snapshot:
+//    val delta = 10000L
+//    val maxLines = 12500L
+//    val sleepInMilliseconds = 0L
+    // for replication:
+    val delta = 0L
+    val maxLines = 9999999999L
+    val sleepInMilliseconds = 1000L
     val connection  = DriverManager.getConnection(connString, user, password)
 
     while (true) {
@@ -129,19 +148,30 @@ fun main() {
         println("Estimation of table: $tableSize size, $rowCount rows")
 
         val exists = checkTableExists(connection, table)
-        if (! exists) {
+        if (!exists) {
             val uptoId = delta - 1
             println("Generating new table [0, ${uptoId}]")
             createTable(connection, table, uptoId)
             continue
         }
         val maxId = getMaxId(connection, table)
-        val uptoId = maxId + delta
-        println("Appending delta [${maxId + 1}, $uptoId]")
-        appendTable(connection, table, maxId+1, uptoId)
+        val fromId = if (checkTableIsEmpty(connection, table)) {0} else {maxId + 1}
+        val uptoId = min(fromId + delta, maxLines - 1)
+        if (fromId > uptoId) {
+            println("Table already hit the cap")
+            break
+        }
+        println("Appending delta [$fromId, $uptoId]")
+        appendTable(connection, table, fromId, uptoId)
+        if (uptoId == maxLines - 1) {
+            break
+        }
 
         if (sleepInMilliseconds > 0L) {
             java.lang.Thread.sleep(sleepInMilliseconds)
         }
     }
+    val tableSize = getTableSize(connection, table)
+    val rowCount = getTableRowsCount(connection, table)
+    println("Table generation done! Estimation of table: $tableSize size, $rowCount rows")
 }

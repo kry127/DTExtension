@@ -185,7 +185,7 @@ data class Wal2JsonMessage(
     fun unixTimestamp() : Long {
         // val template = "2006-01-02 15:04:05.999999999-07"
         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSSSSSSSSX")
-        return sdf.parse(this.timestamp).time
+        return sdf.parse(this.timestamp).time / 1000
     }
 }
 
@@ -438,7 +438,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             ColumnType.COLUMN_TYPE_BIG_INTEGER -> {
                 return columnBuilder.setBigDecimal(result.getBigDecimal(id).toString()).build()
             }
-            ColumnType.COLUMN_TYPE_UNIX_TIME -> return columnBuilder.setUnixTime(result.getTimestamp(id).time).build()
+            ColumnType.COLUMN_TYPE_UNIX_TIME -> return columnBuilder.setUnixTime(result.getTimestamp(id).time / 1000).build()
             ColumnType.COLUMN_TYPE_STRING -> return columnBuilder.setString(result.getString(id) ?: "").build()
             ColumnType.COLUMN_TYPE_BINARY,
             ColumnType.COLUMN_TYPE_UNSPECIFIED,
@@ -477,9 +477,8 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         namespace: String,
         name: String,
         column: Column,
-        wholePrimaryKey: Boolean = false
     ): Cursor {
-        val query = "SELECT max(\"${column.name}\") FROM \"${namespace}\".\"${name}\""
+        val query = "SELECT min(\"${column.name}\"), max(\"${column.name}\") FROM \"${namespace}\".\"${name}\""
         val stmt = connection.prepareStatement(query)
         val result = stmt.executeQuery()
 
@@ -488,19 +487,19 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             throw DtExtensionException("Cannot get min/max for column: empty result set")
         }
         if (result.getObject(1) == null) {
-            // no actual data range: make column cursor with no data range
-            return Cursor.newBuilder().setColumnCursor(
-                ColumnCursor.newBuilder().setColumn(column).build()
+            // no actual data range: make end cursor
+            return Cursor.newBuilder().setEndCursor(
+                EndCursor.getDefaultInstance()
             ).build()
         }
-        val rangeMax = this.getColumnValue(result, 1, column.type)
+        val rangeMin = this.getColumnValue(result, 1, column.type)
+        val rangeMax = this.getColumnValue(result, 2, column.type)
         return Cursor.newBuilder().setColumnCursor(
             ColumnCursor.newBuilder()
                 .setColumn(column)
                 .setDataRange(
                     Common.DataRange.newBuilder()
-                        // NOTE: exclude left interval if column is really key by itself, not a part of some key
-                        .setExcludeFrom(wholePrimaryKey)
+                        .setFrom(rangeMin)
                         .setTo(rangeMax)
                         .build()
                 )
@@ -690,9 +689,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 connection,
                                 namespace,
                                 name,
-                                col,
-                                // if this column is a single key: safely exclude lower bound of cursor
-                                keyCount == 1
+                                col
                             )
                             emit(mkRsp(CursorRsp.newBuilder().setCursor(newCursor).build()))
                         }
