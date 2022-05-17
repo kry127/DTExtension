@@ -650,10 +650,10 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         return flow {
             // INFO: this is the only stateful resources per-gRPC call: connection to database and client ID
             // It is initialized when INIT_CONNECTION_REQ message with full endpoint specification comes
-            lateinit var connection: Connection
+            var initConnection: Connection? = null
             // note, that you can use clientId to persist resources in database for particular client,
             // or if you write completely stateless connector, you may ignore clientId at all
-            lateinit var clientId: String
+            var clientId: String?
 
             requests.collect { req ->
                 val table = req.table
@@ -672,7 +672,9 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
                             this@PostgresSource.ValidateSpec(initConnReq.jsonSettings)
-                            connection = this@PostgresSource.connectToPostgreSQL(initConnReq.jsonSettings)
+                            val newConnection = this@PostgresSource.connectToPostgreSQL(initConnReq.jsonSettings)
+                            initConnection?.close()
+                            initConnection = newConnection
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         ReadCtlReq.CtlReqCase.CURSOR_REQ -> {
@@ -684,6 +686,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // minimum value of interval is excluded and interpreted as last
                             // commited
                             // and selection of pieces is happened as select statement
+                            val connection = initConnection ?: throw DtExtensionException("Connection not initiated!")
                             val cursorReq = req.readCtlReq.cursorReq
                             val schema = this@PostgresSource.schemaQuery(connection, namespace, name)
 
@@ -728,6 +731,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             // that is increase efficiency of using network. For example, you may
                             // transmit 1000 items back to client. You can also pack your change
                             // items in parquet format to be even more efficient
+                            val connection = initConnection ?: throw DtExtensionException("Connection not initiated!")
                             val readChangeReq = req.readCtlReq.readChangeReq
                             val cursor = readChangeReq.cursor
                             val schema = this@PostgresSource.schemaQuery(connection, namespace, name)
@@ -800,6 +804,8 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                     emit(mkBadRsp("exception occured: ${e.message}; full: $e"))
                 }
             }
+
+            initConnection?.close()
         }
     }
 
@@ -829,26 +835,33 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     }
 
     private fun walPeakChangesQuery(slotName: String, limit: Int) : String {
-        return "SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data" +
-                " FROM (" +
-                "    SELECT pg_logical_slot_peek_changes('$slotName', NULL, $limit," +
-                "    'include-xids', 'true'," +
-                "    'include-timestamp', 'true'," +
-                "    'actions', 'insert,update,delete'," +
-                "    'include-lsn', 'true'," +
-                "    'include-transaction', 'true')" +
-                ") AS T"
+        return """
+            SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data
+            FROM (
+                SELECT pg_logical_slot_peek_changes(
+                    '$slotName', NULL, $limit,
+                    'include-xids', 'true',
+                    'include-timestamp', 'true',
+                    'actions', 'insert,update,delete',
+                    'include-lsn', 'true',
+                    'include-transaction', 'true',
+                    'filter-tables', 'public.registry'
+                )
+            ) AS T""".trimIndent()
     }
 
     private fun walMoveSlotQuery(slotName: String, lsn: String) : String {
         // no rights on this command in MDB:
         // return "SELECT pg_replication_slot_advance('$slotName', '${lsn}')"
-        return "SELECT pg_logical_slot_get_changes('$slotName', '$lsn', NULL," +
-                "'include-xids', 'true'," +
-                "'include-timestamp', 'true'," +
-                "'actions', 'insert,update,delete'," +
-                "'include-lsn', 'true'," +
-                "'include-transaction', 'true')"
+        return """
+            SELECT pg_logical_slot_get_changes('$slotName', '$lsn', NULL,
+                'include-xids', 'true',
+                'include-timestamp', 'true',
+                'actions', 'insert,update,delete',
+                'include-lsn', 'true',
+                'include-transaction', 'true',
+                'filter-tables', 'public.registry'
+            )"""
     }
 
     private fun walDeleteSlotQuery(slotName: String): String {

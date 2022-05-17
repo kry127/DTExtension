@@ -174,9 +174,9 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             DataChangeItem.FormatCase.PLAIN_ROW ->
                 when (opType) {
                     Data.OpType.OP_TYPE_INSERT ->
-                        plainRowInsert(connection, table, dataChangeItem.plainRow)
+                        plainRowUpsert(connection, table, dataChangeItem.plainRow)
                     Data.OpType.OP_TYPE_UPDATE ->
-                        plainRowUpdate(connection, table, dataChangeItem.plainRow)
+                        plainRowUpsert(connection, table, dataChangeItem.plainRow)
                     Data.OpType.OP_TYPE_DELETE ->
                         plainRowDelete(connection, table, dataChangeItem.plainRow)
                     Data.OpType.OP_TYPE_UNSPECIFIED,
@@ -188,6 +188,23 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             null, DataChangeItem.FormatCase.FORMAT_NOT_SET ->
                 throw DtExtensionException("unknown type of change item format, plain row or parquet are expected")
         }
+    }
+
+    private fun plainRowUpsert(conn: Connection, table: Table, plainRow: PlainRow) {
+        val namespace = table.namespace.namespace
+        val name = table.name
+        val fields = table.schema.columnsList.joinToString { it.name }
+        val values = table.schema.columnsList.zip(plainRow.valuesList).joinToString {
+                (column, value) -> generateSqlValue(column, value)
+        }
+        val query = """
+            INSERT INTO "$namespace"."$name" ($fields) VALUES ($values)
+            ON CONFLICT (id) DO UPDATE
+                SET ($fields) =  ($values)
+            ;
+            """.trimIndent()
+        val stmt = conn.prepareStatement(query)
+        stmt.execute()
     }
 
     private fun plainRowInsert(conn: Connection, table: Table, plainRow: PlainRow) {
@@ -268,10 +285,10 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         return flow {
             // INFO: this is the only stateful resources per-gRPC call: connection to database and client ID
             // It is initialized when INIT_CONNECTION_REQ message with full endpoint specification comes
-            lateinit var connection: Connection
+            var initConnection: Connection? = null
             // note, that you can use clientId to persist resources in database for particular client,
             // or if you write completely stateless connector, you may ignore clientId at all
-            lateinit var clientId: String
+            var clientId: String?
             // identifies if stream of change items should be transactional
             var transactionalStream = false
             // identifies cleanup policy
@@ -288,12 +305,15 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             // parse params
                             val parameters = Klaxon().parse<PostgresSinkParameters>(initConnReq.jsonSettings)
                                 ?: throw DtExtensionException("Parameters cannot be empty")
-                            connection = this@PostgresSink.connectToPostgreSQL(parameters)
+                            val newConnection = this@PostgresSink.connectToPostgreSQL(parameters)
+                            initConnection?.close()
+                            initConnection = newConnection
                             transactionalStream = parameters.transactionalStream
                             cleanupPolicy = parameters.getCleanupPolicy()
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         Write.WriteControlItemReq.ControlItemReqCase.BEGIN_SNAPSHOT_REQ -> {
+                            val connection = initConnection ?: throw DtExtensionException("Connection not initiated")
                             val beginSnapshotReq = req.controlItemReq.beginSnapshotReq
                             val table = beginSnapshotReq.table
                             when (cleanupPolicy) {
@@ -319,6 +339,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             emit(mkRsp(WriteDoneSnapshotRsp.getDefaultInstance()))
                         }
                         Write.WriteControlItemReq.ControlItemReqCase.ITEM_REQ -> {
+                            val connection = initConnection ?: throw DtExtensionException("Connection not initiated")
                             val dataItemReq = req.controlItemReq.itemReq
                             when (dataItemReq.writeItemReqCase) {
                                 Write.WriteItemReq.WriteItemReqCase.CHANGE_ITEM -> {
@@ -359,6 +380,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                     emit(mkBadRsp("exception occured: ${e.message}; full: $e"))
                 }
             }
+            initConnection?.close()
         }
     }
 }
