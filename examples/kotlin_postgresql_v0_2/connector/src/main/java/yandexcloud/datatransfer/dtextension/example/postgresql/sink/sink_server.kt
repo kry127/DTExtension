@@ -10,6 +10,12 @@ fun main() {
         .addService(PostgresSink())
         .addService(ProtoReflectionService.newInstance())
         .build()
+
+    Runtime.getRuntime().addShutdownHook(Thread {
+        server.shutdown()
+        server.awaitTermination()
+    })
+
     server.start()
     server.awaitTermination()
 }
