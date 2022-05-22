@@ -26,7 +26,10 @@ import yandexcloud.datatransfer.dtextension.v0_2.sink.Write.WriteItemRsp
 import yandexcloud.datatransfer.dtextension.v0_2.sink.Write.WriteDoneSnapshotRsp
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.Statement
 import java.util.*
+import kotlin.time.ExperimentalTime
+import kotlin.time.measureTime
 
 enum class CleanupPolicy { DROP, TRUNCATE, DISABLED }
 
@@ -167,18 +170,18 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         stmt.execute()
     }
 
-    private fun processDataChangeItem(connection: Connection, dataChangeItem: DataChangeItem) {
+    private fun processDataChangeItem(batch: Statement, connection: Connection, dataChangeItem: DataChangeItem) {
         val table = dataChangeItem.table
         val opType = dataChangeItem.opType
         when (dataChangeItem.formatCase) {
             DataChangeItem.FormatCase.PLAIN_ROW ->
                 when (opType) {
                     Data.OpType.OP_TYPE_INSERT ->
-                        plainRowUpsert(connection, table, dataChangeItem.plainRow)
+                        plainRowUpsert(batch, connection, table, dataChangeItem.plainRow)
                     Data.OpType.OP_TYPE_UPDATE ->
-                        plainRowUpsert(connection, table, dataChangeItem.plainRow)
+                        plainRowUpsert(batch, connection, table, dataChangeItem.plainRow)
                     Data.OpType.OP_TYPE_DELETE ->
-                        plainRowDelete(connection, table, dataChangeItem.plainRow)
+                        plainRowDelete(batch, connection, table, dataChangeItem.plainRow)
                     Data.OpType.OP_TYPE_UNSPECIFIED,
                     Data.OpType.UNRECOGNIZED,
                     null -> throw DtExtensionException("unknown operation type: $opType")
@@ -190,7 +193,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         }
     }
 
-    private fun plainRowUpsert(conn: Connection, table: Table, plainRow: PlainRow) {
+    private fun plainRowUpsert(batch: Statement, conn: Connection, table: Table, plainRow: PlainRow) {
         val namespace = table.namespace.namespace
         val name = table.name
         val fields = table.schema.columnsList.joinToString { it.name }
@@ -203,11 +206,10 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                 SET ($fields) =  ($values)
             ;
             """.trimIndent()
-        val stmt = conn.prepareStatement(query)
-        stmt.execute()
+        batch.addBatch(query)
     }
 
-    private fun plainRowInsert(conn: Connection, table: Table, plainRow: PlainRow) {
+    private fun plainRowInsert(batch: Statement, conn: Connection, table: Table, plainRow: PlainRow) {
         val namespace = table.namespace.namespace
         val name = table.name
         val fields = table.schema.columnsList.joinToString { it.name }
@@ -215,11 +217,10 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                 (column, value) -> generateSqlValue(column, value)
         }
         val query = "INSERT INTO \"$namespace\".\"$name\" ($fields) VALUES ($values);"
-        val stmt = conn.prepareStatement(query)
-        stmt.execute()
+        batch.addBatch(query)
     }
 
-    private fun plainRowUpdate(conn: Connection, table: Table, plainRow: PlainRow) {
+    private fun plainRowUpdate(batch: Statement, conn: Connection, table: Table, plainRow: PlainRow) {
         val namespace = table.namespace.namespace
         val name = table.name
         val fields = table.schema.columnsList.joinToString { it.name }
@@ -228,16 +229,14 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         }
         val identity = generateIdentity(table.schema.columnsList, plainRow)
         val query = "UPDATE \"$namespace\".\"$name\" SET ($fields) =  ($values) WHERE ($identity);"
-        val stmt = conn.prepareStatement(query)
-        stmt.execute()
+        batch.addBatch(query)
     }
-    private fun plainRowDelete(conn: Connection, table: Table, plainRow: PlainRow) {
+    private fun plainRowDelete(batch: Statement, conn: Connection, table: Table, plainRow: PlainRow) {
         val namespace = table.namespace.namespace
         val name = table.name
         val identity = generateIdentity(table.schema.columnsList, plainRow)
         val query = "DELETE FROM \"$namespace\".\"$name\" WHERE ($identity);"
-        val stmt = conn.prepareStatement(query)
-        stmt.execute()
+        batch.addBatch(query)
     }
 
     override suspend fun spec(request: Common.SpecReq): Common.SpecRsp {
@@ -264,6 +263,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             .build()
     }
 
+    @OptIn(ExperimentalTime::class)
     override fun write(requests: Flow<SinkServiceOuterClass.WriteReq>): Flow<SinkServiceOuterClass.WriteRsp> {
         fun mkRsp(controlItem: Any): WriteRsp {
             val writeCtlRsp = WriteControlItemRsp.newBuilder()
@@ -293,6 +293,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             var transactionalStream = false
             // identifies cleanup policy
             var cleanupPolicy = CleanupPolicy.DISABLED
+            var txStatement : Statement? = null
 
             requests.collect { req ->
                 try {
@@ -309,6 +310,7 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                             initConnection?.close()
                             initConnection = newConnection
                             transactionalStream = parameters.transactionalStream
+
                             cleanupPolicy = parameters.getCleanupPolicy()
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
@@ -349,10 +351,13 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                                             connection.autoCommit = false;
                                         }
                                     }
+                                    if (txStatement == null) {
+                                        txStatement = connection.createStatement()
+                                    }
                                     // no response needed here, but we need to store change item in a database
                                     when (dataItemReq.changeItem.changeItemCase) {
                                         Data.ChangeItem.ChangeItemCase.DATA_CHANGE_ITEM ->  {
-                                            processDataChangeItem(connection, dataItemReq.changeItem.dataChangeItem)
+                                            processDataChangeItem(txStatement!!, connection, dataItemReq.changeItem.dataChangeItem)
                                         }
                                         Data.ChangeItem.ChangeItemCase.HOMO_CHANGE_ITEM -> {
                                             // skip this change items, because we do not generate homo change items on source
@@ -362,6 +367,8 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
                                     }
                                 }
                                 Write.WriteItemReq.WriteItemReqCase.CHECK_POINT -> {
+                                    txStatement?.executeBatch()
+                                    txStatement = null
                                     if (transactionalStream) {
                                         // this is a transaction border fo sequence of sent CHANGE_ITEM messages
                                         // reply with responce here to notify client that we are ready to accept next transaction
