@@ -3,6 +3,8 @@ package sink
 import (
 	"bytes"
 	"fmt"
+	"encoding/json"
+
 	"github.com/xeipuuv/gojsonschema"
 	"golang.org/x/xerrors"
 )
@@ -14,9 +16,9 @@ type SpecParameters struct {
 	MongoConnectionString string `json:"mongo_connection_string"`
 }
 
-func Validate(json string) error {
+func Validate(jsonParams string) error {
 	specLoader := gojsonschema.NewStringLoader(Specification)
-	jsonLoader := gojsonschema.NewStringLoader(json)
+	jsonLoader := gojsonschema.NewStringLoader(jsonParams)
 
 	result, err := gojsonschema.Validate(specLoader, jsonLoader)
 	if err != nil {
@@ -32,4 +34,14 @@ func Validate(json string) error {
 	}
 	// that's OK!
 	return nil
+}
+
+
+func Parse(jsonParams string) (*SpecParameters, error) {
+	var result SpecParameters
+	err := json.Unmarshal([]byte(jsonParams), &result)
+	if err != nil {
+		return nil, xerrors.Errorf("cannot unmarshal JSON to parameters: %w", err)
+	}
+	return &result, nil
 }
