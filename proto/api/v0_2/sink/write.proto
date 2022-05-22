@@ -3,6 +3,7 @@ syntax = "proto3";
 // Author: kry127
 
 package yandexcloud.datatransfer.dtextension.v0_2.sink;
+option go_package = "kry127.ru/dtextension/go/pkg/api/v0_2/sink";
 
 import "api/v0_2/common.proto";
 import "api/v0_2/data.proto";

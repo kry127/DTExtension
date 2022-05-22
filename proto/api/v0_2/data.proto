@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package yandexcloud.datatransfer.dtextension.v0_2;
+option go_package = "kry127.ru/dtextension/go/pkg/api/v0_2";
 
 message Namespace {
     string namespace = 1;
