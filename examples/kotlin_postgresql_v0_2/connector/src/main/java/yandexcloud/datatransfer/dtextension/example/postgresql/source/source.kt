@@ -306,6 +306,7 @@ data class PostgresSourceParameters(
     val jdbc_conn_string: String,
     val user: String,
     val password: String,
+    val useParquet: Boolean = false,
 )
 
 class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
@@ -461,6 +462,50 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         }
     }
 
+
+    private fun getParquetValue(columnType: ColumnType): ParquetValue.Builder {
+        val parquetValue = ParquetValue.newBuilder()
+        return when (columnType) {
+            ColumnType.COLUMN_TYPE_BOOL -> parquetValue.setBool(ParquetValue.ParquetBool.newBuilder())
+            ColumnType.COLUMN_TYPE_INT32 -> parquetValue.setInt32(ParquetValue.ParquetInt32.newBuilder())
+            ColumnType.COLUMN_TYPE_INT64 -> parquetValue.setInt64(ParquetValue.ParquetInt64.newBuilder())
+            ColumnType.COLUMN_TYPE_UINT32 -> parquetValue.setUint32(ParquetValue.ParquetUInt32.newBuilder())
+            ColumnType.COLUMN_TYPE_UINT64 -> parquetValue.setUint64(ParquetValue.ParquetUInt64.newBuilder())
+            ColumnType.COLUMN_TYPE_FLOAT -> parquetValue.setFloat(ParquetValue.ParquetFloat.newBuilder())
+            ColumnType.COLUMN_TYPE_DOUBLE -> parquetValue.setDouble(ParquetValue.ParquetDouble.newBuilder())
+            ColumnType.COLUMN_TYPE_JSON -> parquetValue.setJson(ParquetValue.ParquetString.newBuilder())
+            ColumnType.COLUMN_TYPE_DECIMAL -> parquetValue.setDecimal(ParquetValue.ParquetDecimal.newBuilder())
+            ColumnType.COLUMN_TYPE_BIG_DECIMAL,
+            ColumnType.COLUMN_TYPE_BIG_INTEGER -> parquetValue.setBigDecimal(ParquetValue.ParquetString.newBuilder())
+            ColumnType.COLUMN_TYPE_UNIX_TIME -> parquetValue.setUnixTime(ParquetValue.ParquetInt64.newBuilder())
+            ColumnType.COLUMN_TYPE_STRING -> parquetValue.setString(ParquetValue.ParquetString.newBuilder())
+            ColumnType.COLUMN_TYPE_BINARY,
+            ColumnType.COLUMN_TYPE_UNSPECIFIED,
+            ColumnType.UNRECOGNIZED -> parquetValue.setBinary(ParquetValue.ParquetBytes.newBuilder())
+        }
+    }
+
+    private fun putColumnValue(columnType: ColumnType, parquetValue: ParquetValue.Builder, columnVal: ColumnValue) {
+        when (columnType) {
+            ColumnType.COLUMN_TYPE_BOOL -> parquetValue.boolBuilder.addValues(columnVal.bool)
+            ColumnType.COLUMN_TYPE_INT32 -> parquetValue.int32Builder.addValues(columnVal.int32)
+            ColumnType.COLUMN_TYPE_INT64 -> parquetValue.int64Builder.addValues(columnVal.int64)
+            ColumnType.COLUMN_TYPE_UINT32 -> parquetValue.uint32Builder.addValues(columnVal.uint32)
+            ColumnType.COLUMN_TYPE_UINT64 -> parquetValue.uint64Builder.addValues(columnVal.uint64)
+            ColumnType.COLUMN_TYPE_FLOAT -> parquetValue.floatBuilder.addValues(columnVal.float)
+            ColumnType.COLUMN_TYPE_DOUBLE -> parquetValue.doubleBuilder.addValues(columnVal.double)
+            ColumnType.COLUMN_TYPE_JSON -> parquetValue.jsonBuilder.addValues(columnVal.json)
+            ColumnType.COLUMN_TYPE_DECIMAL -> parquetValue.decimalBuilder.addValues(columnVal.decimal)
+            ColumnType.COLUMN_TYPE_BIG_DECIMAL,
+            ColumnType.COLUMN_TYPE_BIG_INTEGER -> parquetValue.bigIntegerBuilder.addValues(columnVal.bigInteger)
+            ColumnType.COLUMN_TYPE_UNIX_TIME -> parquetValue.unixTimeBuilder.addValues(columnVal.unixTime)
+            ColumnType.COLUMN_TYPE_STRING -> parquetValue.stringBuilder.addValues(columnVal.string)
+            ColumnType.COLUMN_TYPE_BINARY,
+            ColumnType.COLUMN_TYPE_UNSPECIFIED,
+            ColumnType.UNRECOGNIZED -> parquetValue.binaryBuilder.addValues(columnVal.binary)
+        }
+    }
+
     private fun columnValueAsSqlString(columnValue: ColumnValue): String {
         return when (columnValue.dataCase) {
             ColumnValue.DataCase.BOOL -> columnValue.bool.toString()
@@ -565,6 +610,33 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         }
     }
 
+
+    private fun getTableDeltaAsParquet(
+        connection: Connection, cursor: Cursor, namespace: String, name: String,
+        schema: Schema, window: Int
+    ): Pair<Parquet, ColumnValue> {
+        val (toRepack, maxColumnValue) = getTableDeltaAsPlainRow(connection, cursor, namespace, name, schema, window)
+        if (toRepack.isEmpty()) {
+            return Pair(Parquet.getDefaultInstance(), maxColumnValue)
+        }
+
+        val parquet = Parquet.newBuilder()
+        for (i in 0 until schema.columnsList.size) {
+            val type = schema.columnsList[i].type
+            val pv = getParquetValue(type)
+            parquet.addParquetValues(pv)
+        }
+
+        for (row in toRepack) {
+            for (i in 0 until schema.columnsList.size) {
+                val type = schema.columnsList[i].type
+                putColumnValue(type, parquet.getParquetValuesBuilder(i), row.getValues(i))
+            }
+        }
+
+        return Pair(parquet.build(), maxColumnValue)
+    }
+
     override suspend fun spec(request: Common.SpecReq): Common.SpecRsp {
         val specPath = javaClass.getResource(specificationPath)
             ?: return Common.SpecRsp.newBuilder()
@@ -654,6 +726,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             // note, that you can use clientId to persist resources in database for particular client,
             // or if you write completely stateless connector, you may ignore clientId at all
             var clientId: String?
+            var useParquet = false
 
             requests.collect { req ->
                 val table = req.table
@@ -735,55 +808,96 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val readChangeReq = req.readCtlReq.readChangeReq
                             val cursor = readChangeReq.cursor
                             val schema = this@PostgresSource.schemaQuery(connection, namespace, name)
-                            // TODO rework delta extraction for cursor commitment
-                            val (changeItems, maxColumn) = this@PostgresSource.getTableDeltaAsPlainRow(
-                                connection, cursor, namespace, name, schema, 1000
-                            )
+
                             val columnCursor = cursor.columnCursor
                                 ?: throw DtExtensionException("Only column cursors are supported")
 
                             val colCursorId = schema.columnsList.indexOfFirst { it.name == columnCursor.column.name }
                             if (colCursorId == -1) throw DtExtensionException("Column cursor not found in schema")
 
-                            // emit series of change items in row
-                            changeItems.forEach {
-                                // emit change items
+                            // TODO rework delta extraction for cursor commitment
+                            if (!useParquet) {
+                                val (changeItems, maxColumn) = this@PostgresSource.getTableDeltaAsPlainRow(
+                                    connection, cursor, namespace, name, schema, 1000)
+
+                                // emit series of change items in row
+                                changeItems.forEach {
+                                    // emit change items
+                                    val controlItem =
+                                        ReadChangeRsp.newBuilder().setChangeItem(
+                                            ChangeItem.newBuilder().setDataChangeItem(
+                                                DataChangeItem.newBuilder()
+                                                    .setOpType(OpType.OP_TYPE_INSERT)
+                                                    .setTable(table)
+                                                    .setPlainRow(it)
+                                            )
+                                        )
+                                            .build()
+                                    emit(mkRsp(controlItem))
+                                }
+
+                                // define checkpoint cursor
+                                val checkpointCursor = if (changeItems.isEmpty()) {
+                                    // if result is empty, declare as EOF
+                                    Cursor.newBuilder().setEndCursor(EndCursor.getDefaultInstance())
+                                } else {
+                                    // else, move cursor further and cooperate it to client
+                                    Cursor.newBuilder().setColumnCursor(
+                                        columnCursor.toBuilder().setDataRange(
+                                            columnCursor.dataRange.toBuilder()
+                                                .setFrom(maxColumn)
+                                                .setExcludeFrom(true)
+                                        )
+                                    )
+                                }
+                                // demarcate end of change item stream: pass the ball to client again
+                                emit(
+                                    mkRsp(
+                                        ReadChangeRsp.newBuilder().setCheckpoint(
+                                            ReadChangeRsp.CheckPoint.newBuilder().setCursor(checkpointCursor)
+                                        ).build()
+                                    )
+                                )
+                            } else {
+                                val (parquet, maxColumn) = this@PostgresSource.getTableDeltaAsParquet(
+                                    connection, cursor, namespace, name, schema, 1000)
+
+                                // emit one change item with parquet
                                 val controlItem =
                                     ReadChangeRsp.newBuilder().setChangeItem(
                                         ChangeItem.newBuilder().setDataChangeItem(
                                             DataChangeItem.newBuilder()
                                                 .setOpType(OpType.OP_TYPE_INSERT)
                                                 .setTable(table)
-                                                .setPlainRow(it)
+                                                .setParquet(parquet)
                                         )
                                     )
-                                    .build()
+                                        .build()
                                 emit(mkRsp(controlItem))
-                            }
 
-                            // define checkpoint cursor
-                            val checkpointCursor = if (changeItems.isEmpty()) {
-                                // if result is empty, declare as EOF
-                                Cursor.newBuilder().setEndCursor(EndCursor.getDefaultInstance())
-                            } else {
-                                // else, move cursor further and cooperate it to client
-                                Cursor.newBuilder().setColumnCursor(
-                                    columnCursor.toBuilder().setDataRange(
-                                        columnCursor.dataRange.toBuilder()
-                                            .setFrom(maxColumn)
-                                            .setExcludeFrom(true)
+                                // define checkpoint cursor
+                                val checkpointCursor = if (parquet.parquetValuesCount == 0) {
+                                    // if result is empty, declare as EOF
+                                    Cursor.newBuilder().setEndCursor(EndCursor.getDefaultInstance())
+                                } else {
+                                    // else, move cursor further and cooperate it to client
+                                    Cursor.newBuilder().setColumnCursor(
+                                        columnCursor.toBuilder().setDataRange(
+                                            columnCursor.dataRange.toBuilder()
+                                                .setFrom(maxColumn)
+                                                .setExcludeFrom(true)
+                                        )
+                                    )
+                                }
+                                // demarcate end of change item stream: pass the ball to client again
+                                emit(
+                                    mkRsp(
+                                        ReadChangeRsp.newBuilder().setCheckpoint(
+                                            ReadChangeRsp.CheckPoint.newBuilder().setCursor(checkpointCursor)
+                                        ).build()
                                     )
                                 )
                             }
-                            // demarcate end of change item stream: pass the ball to client again
-                            emit(
-                                mkRsp(
-                                    ReadChangeRsp.newBuilder().setCheckpoint(
-                                        ReadChangeRsp.CheckPoint.newBuilder().setCursor(checkpointCursor)
-                                    ).build()
-                                )
-                            )
-
                         }
                         ReadCtlReq.CtlReqCase.DONE_SNAPSHOT_REQ -> {
                             // STEP 5: when upload of the table is over, you will be notified by client
