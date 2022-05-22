@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://kry127.ru/golang_mongo.json",
+  "title": "DTExtension MongoDB sink configuration",
+  "type": "object",
+  "default": {},
+  "required": [
+    "mongo_connection_string"
+  ],
+  "properties": {
+    "mongo_connection_string": {
+      "type": "string",
+      "default": "",
+      "title": "The mongo_connection_string Schema",
+      "examples": [
+        "A green door"
+      ]
+    }
+  },
+  "examples": [{
+    "mongo_connection_string": "A green door"
+  }]
+}
