@@ -14,6 +14,7 @@ var Specification string
 
 type SpecParameters struct {
 	MongoConnectionString string `json:"mongo_connection_string"`
+	TLSCertificate string `json:"tls_certificate"`
 }
 
 func Validate(jsonParams string) error {

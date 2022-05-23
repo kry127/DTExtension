@@ -15,9 +15,14 @@
       "examples": [
         "A green door"
       ]
+    },
+    "tls_certificate": {
+      "type": "string",
+      "default": "",
+      "title": "The TLS certificate that should be appended in connection string. If specified, appends '&tls=true&tlscafile=[file with content of this param]' to connection string"
     }
   },
   "examples": [{
-    "mongo_connection_string": "A green door"
+    "mongo_connection_string": "mongodb://user:pwd@localhost/db?replicaSet=rs01"
   }]
 }

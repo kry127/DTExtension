@@ -3,6 +3,7 @@ package sink
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/xerrors"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"kry127.ru/dtextension/go/pkg/api/v0_2"
 	"kry127.ru/dtextension/go/pkg/api/v0_2/sink"
 	"log"
+	"os"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -259,6 +261,36 @@ func (m *mongoSinkService) Write(server sink.SinkService_WriteServer) (outErr er
 				continue
 			}
 
+			connString := params.MongoConnectionString
+			if params.TLSCertificate != "" {
+				f, err := os.CreateTemp("", "DTExtension_")
+				if err != nil {
+					sendError(xerrors.Errorf("cannot build connection string: %w", err))
+					continue
+				}
+				from := 0
+				n := 0
+				for from < len(params.TLSCertificate) {
+					n, err = f.WriteString(params.TLSCertificate[from:])
+					if err != nil {
+						break
+					}
+					from += n
+				}
+				if err != nil {
+					sendError(xerrors.Errorf("cannot build connection string: %w", err))
+					continue
+				}
+				if err := f.Sync(); err != nil {
+					sendError(xerrors.Errorf("cannot build connection string: %w", err))
+					continue
+				}
+				if err := f.Close(); err != nil {
+					sendError(xerrors.Errorf("cannot build connection string: %w", err))
+					continue
+				}
+				connString = fmt.Sprintf("%s&tls=true&tlscafile=%s", connString, f.Name())
+			}
 			initClient, err = mongo.NewClient(options.Client().ApplyURI(params.MongoConnectionString))
 			if err != nil {
 				sendError(xerrors.Errorf("client initialization error: %w", err))
