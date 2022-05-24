@@ -17,7 +17,9 @@ service SourceService {
     // Method discover is used to fetch available replication objects
     rpc Discover(DiscoverReq) returns (DiscoverRsp) {}
 
+    // Read is snapshot fetching protocol
     rpc Read(stream ReadReq) returns (stream ReadRsp) {}
+    // Stream is CDC fetching protocol
     rpc Stream(stream StreamReq) returns (stream StreamRsp) {}
 }
 
