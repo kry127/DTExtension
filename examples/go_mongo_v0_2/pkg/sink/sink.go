@@ -291,23 +291,33 @@ func (m *mongoSinkService) Write(server sink.SinkService_WriteServer) (outErr er
 				}
 				connString = fmt.Sprintf("%s&tls=true&tlscafile=%s", connString, f.Name())
 			}
-			initClient, err = mongo.NewClient(options.Client().ApplyURI(params.MongoConnectionString))
+			newInitClient, err := mongo.NewClient(options.Client().ApplyURI(connString))
 			if err != nil {
 				sendError(xerrors.Errorf("client initialization error: %w", err))
 				continue
 			}
 
-			err = initClient.Connect(server.Context())
+			err = newInitClient.Connect(server.Context())
 			if err != nil {
 				sendError(xerrors.Errorf("client connection error: %w", err))
 				continue
 			}
 
+			if initClient != nil {
+				err := initClient.Disconnect(server.Context())
+				if err != nil {
+					log.Printf("cannot close previous connection: %v", err)
+				}
+			}
+			initClient = newInitClient
+
 			err = server.Send(&sink.WriteRsp{
 				Result: common.OkResult(),
 				ControlItemRsp: &sink.WriteControlItemRsp{
 					ControlItemRsp: &sink.WriteControlItemRsp_InitRsp{
-						InitRsp: &v0_2.InitRsp{},
+						InitRsp: &v0_2.InitRsp{
+							ClientId: initReq.ClientId,
+						},
 					},
 				},
 			})

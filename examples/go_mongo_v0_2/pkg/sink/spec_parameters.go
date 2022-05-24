@@ -2,14 +2,15 @@ package sink
 
 import (
 	"bytes"
-	"fmt"
+	_ "embed"
 	"encoding/json"
+	"fmt"
 
 	"github.com/xeipuuv/gojsonschema"
 	"golang.org/x/xerrors"
 )
 
-// go:embed spec.json
+//go:embed spec.json
 var Specification string
 
 type SpecParameters struct {
