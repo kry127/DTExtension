@@ -33,6 +33,43 @@
       "examples": [
         "password"
       ]
+    },
+    "include_list": { "$ref": "#/$defs/tableList" },
+    "exclude_list": { "$ref": "#/$defs/tableList" }
+  },
+  "$defs": {
+    "tableList": {
+      "type": "array",
+      "default": [],
+      "title": "A list of included tables",
+      "items": {
+        "type": "object",
+        "title": "A Schema",
+        "required": [
+          "ns",
+          "name"
+        ],
+        "properties": {
+          "ns": {
+            "type": "string",
+            "title": "table namespace"
+          },
+          "name": {
+            "type": "string",
+            "title": "table name"
+          }
+        }
+      },
+      "examples": [
+        [{
+          "ns": "ns1",
+          "name": "name1"
+        },
+          {
+            "ns": "ns2",
+            "name": "name2"
+          }]
+      ]
     }
   },
   "examples": [{

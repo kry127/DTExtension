@@ -60,12 +60,9 @@ object PsqlQueries {
         }
     }
 
-    fun listTablesQuery(schema: String): String {
-        val schemaCondition = if (schema != "*") {
-            "AND ns.nspname = ?"
-        } else {
-            "AND ns.nspname NOT IN (${pgSystemSchemas.joinToString { "'$it'" }})"
-        }
+    fun listTablesQuery(parameters: PostgresSourceParameters): String {
+        val includeSchemaCondition = parameters.includeList.joinToString (prefix = "(1=1", postfix = ")") { "OR (ns.nspname='${it.namespace}' AND c.relname='${it.name}')" }
+        val excludeSchemaCondition = parameters.excludeList.joinToString (prefix = "(1=1", postfix = ")") { "OR (ns.nspname='${it.namespace}' AND c.relname='${it.name}')" }
 
         return """
 SELECT
@@ -89,7 +86,9 @@ FROM
 WHERE
 	has_schema_privilege(ns.oid, 'USAGE')
 	AND has_table_privilege(c.oid, 'SELECT')
-    $schemaCondition
+    $includeSchemaCondition
+    $excludeSchemaCondition
+    AND ns.nspname NOT IN (${pgSystemSchemas.joinToString { "'$it'" }})
     AND c.relname NOT IN (${pgSystemSchemas.joinToString { "'$it'" }})
     AND c.relkind = 'r'
         """
@@ -302,17 +301,24 @@ data class Wal2JsonKeyChange(
     val keyvalues: List<Any>,
 )
 
+data class PgTable (
+    val namespace: String,
+    val name: String,
+)
+
 data class PostgresSourceParameters(
     val jdbc_conn_string: String,
     val user: String,
     val password: String,
     val useParquet: Boolean = false,
+    val includeList: List<PgTable> = listOf(),
+    val excludeList: List<PgTable> = listOf(),
 )
 
 class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
     private val specificationPath = "/source_spec.json";
 
-    private fun ValidateSpec(jsonSpec: String) {
+    private fun validateSpec(jsonSpec: String) : PostgresSourceParameters {
         val specPath = javaClass.getResource(specificationPath)
             ?: throw DtExtensionException("Spec file not found")
         val specSchema = JSONSchema.parse(specPath.readText())
@@ -323,12 +329,11 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
             throw DtExtensionException(err)
         }
         // TODO add extra validation if needed
+        return Klaxon().parse<PostgresSourceParameters>(jsonSpec)
+            ?: throw DtExtensionException("Parameters cannot be empty")
     }
 
-    private fun connectToPostgreSQL(jsonSpec: String): Connection {
-        val parameters = Klaxon().parse<PostgresSourceParameters>(jsonSpec)
-            ?: throw DtExtensionException("Parameters cannot be empty")
-
+    private fun connectToPostgreSQL(parameters: PostgresSourceParameters): Connection {
         return DriverManager.getConnection(parameters.jdbc_conn_string, parameters.user, parameters.password)
     }
 
@@ -650,7 +655,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
     override suspend fun check(request: Common.CheckReq): Common.CheckRsp {
         try {
-            this.ValidateSpec(request.jsonSettings)
+            this.validateSpec(request.jsonSettings)
         } catch (e: java.lang.Exception) {
             return Common.CheckRsp.newBuilder()
                 .setResult(RspUtil.resultError("exception occured: ${e.message}"))
@@ -663,11 +668,11 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
 
     override suspend fun discover(request: SourceServiceOuterClass.DiscoverReq): SourceServiceOuterClass.DiscoverRsp {
         try {
-            this.ValidateSpec(request.jsonSettings)
-            val connection = this.connectToPostgreSQL(request.jsonSettings)
+            val parameters = this.validateSpec(request.jsonSettings)
+            val connection = this.connectToPostgreSQL(parameters)
 
             val query = connection
-                .prepareStatement(PsqlQueries.listTablesQuery("*"))
+                .prepareStatement(PsqlQueries.listTablesQuery(parameters))
 
             val tables = mutableListOf<Table>()
 
@@ -744,8 +749,8 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val initConnReq = req.readCtlReq.initReq
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
-                            this@PostgresSource.ValidateSpec(initConnReq.jsonSettings)
-                            val newConnection = this@PostgresSource.connectToPostgreSQL(initConnReq.jsonSettings)
+                            val parameters = this@PostgresSource.validateSpec(initConnReq.jsonSettings)
+                            val newConnection = this@PostgresSource.connectToPostgreSQL(parameters)
                             initConnection?.close()
                             initConnection = newConnection
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
@@ -948,7 +953,9 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                 "WHERE slot_name='$slotName';"
     }
 
-    private fun walPeakChangesQuery(slotName: String, limit: Int) : String {
+    private fun walPeakChangesQuery(parameters: PostgresSourceParameters, slotName: String, limit: Int) : String {
+        val includeList = parameters.includeList.joinToString { "\"${it.namespace}\".\"${it.name}\"" } .let { if (it != "") {"'add-tables', $it,"} else "" }
+        val excludeList = parameters.excludeList.joinToString { "\"${it.namespace}\".\"${it.name}\"" } .let { if (it != "") {"'filter-tables', $it,"} else "" }
         return """
             SELECT (T.pg_logical_slot_peek_changes).lsn, (T.pg_logical_slot_peek_changes).data
             FROM (
@@ -958,23 +965,27 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                     'include-timestamp', 'true',
                     'actions', 'insert,update,delete',
                     'include-lsn', 'true',
-                    'include-transaction', 'true',
-                    'filter-tables', 'public.registry'
+                    $includeList
+                    $excludeList
+                    'include-transaction', 'true'
                 )
             ) AS T""".trimIndent()
     }
 
-    private fun walMoveSlotQuery(slotName: String, lsn: String) : String {
+    private fun walMoveSlotQuery(parameters: PostgresSourceParameters, slotName: String, lsn: String) : String {
         // no rights on this command in MDB:
         // return "SELECT pg_replication_slot_advance('$slotName', '${lsn}')"
+        val includeList = parameters.includeList.joinToString { "'${it.namespace}'.'${it.name}" } .let { if (it != "") {"'add-tables', $it,"} else "" }
+        val excludeList = parameters.excludeList.joinToString { "'${it.namespace}'.'${it.name}" } .let { if (it != "") {"'filter-tables', $it,"} else "" }
         return """
             SELECT pg_logical_slot_get_changes('$slotName', '$lsn', NULL,
                 'include-xids', 'true',
                 'include-timestamp', 'true',
                 'actions', 'insert,update,delete',
                 'include-lsn', 'true',
-                'include-transaction', 'true',
-                'filter-tables', 'public.registry'
+                $includeList
+                $excludeList
+                'include-transaction', 'true'
             )"""
     }
 
@@ -993,8 +1004,8 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         }
     }
 
-    private fun forwardSlot(connection: Connection, slotName: String, beyondLsn: String) {
-        val moveLsnQ = walMoveSlotQuery(slotName, beyondLsn)
+    private fun forwardSlot(parameters: PostgresSourceParameters, connection: Connection, slotName: String, beyondLsn: String) {
+        val moveLsnQ = walMoveSlotQuery(parameters, slotName, beyondLsn)
         val stmt = connection.prepareStatement(moveLsnQ)
         stmt.executeQuery().use {  }
     }
@@ -1022,8 +1033,9 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
         val clusterSource = StreamSource.newBuilder().setCluster(StreamSource.Cluster.getDefaultInstance())
 
         return flow {
-            lateinit var clientId: String
-            lateinit var connection: Connection
+            var clientId: String = ""
+            var initConnection: Connection? = null
+            var initParameters: PostgresSourceParameters? = null
 
             fun genSlotName(clientId: String) = "slot_for_$clientId"
 
@@ -1040,11 +1052,12 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             val initConnReq = req.streamCtlReq.initReq
                             clientId = initConnReq.clientId ?: UUID.randomUUID().toString()
                             // check spec and initialize connection (as in previous handles)
-                            this@PostgresSource.ValidateSpec(initConnReq.jsonSettings)
-                            connection = this@PostgresSource.connectToPostgreSQL(initConnReq.jsonSettings)
+                            initParameters = this@PostgresSource.validateSpec(initConnReq.jsonSettings)
+                            initConnection = initParameters?.let { this@PostgresSource.connectToPostgreSQL(it) }
                             emit(mkRsp(InitRsp.newBuilder().setClientId(clientId).build()))
                         }
                         StreamCtlReq.CtlReqCase.FIX_LSN_REQ -> {
+                            val connection = initConnection ?: throw DtExtensionException("connection should be initiated")
                             // STEP 2: the next thing client will want is to fix LSN position
                             // This can be skipped if Client have already done this step and
                             // didn't send request for REWIND_LSN_REQ, or client received
@@ -1098,6 +1111,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             )
                         }
                         StreamCtlReq.CtlReqCase.CHECK_LSN_REQ -> {
+                            val connection = initConnection ?: throw DtExtensionException("connection should be initiated")
                             // normally, we should check if LSN still here, but PostgreSQL guarantees
                             // LSN persistance if user hasn't moves slot of replication.
                             val forLsn = req.streamCtlReq.checkLsnReq.lsn.lsnValue.string
@@ -1111,6 +1125,7 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             emit(mkRsp(CheckLsnRsp.newBuilder().setAlive(true).build()))
                         }
                         StreamCtlReq.CtlReqCase.REWIND_LSN_REQ -> {
+                            val connection = initConnection ?: throw DtExtensionException("connection should be initiated")
                             val forLsn = req.streamCtlReq.rewindLsnReq.lsn
                             val slotName = genSlotName(clientId)
                             // first things first, check slot:
@@ -1132,6 +1147,8 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                             emit(mkRsp(RewindLsnRsp.newBuilder().build()))
                         }
                         StreamCtlReq.CtlReqCase.STREAM_CHANGE_REQ -> {
+                            val connection = initConnection ?: throw DtExtensionException("connection should be initiated")
+                            val parameters = initParameters ?: throw DtExtensionException("connection should be initiated")
                             val changeReq = req.streamCtlReq.streamChangeReq
                             val forLsn = changeReq.lsn.lsnValue.string
                             val slotName = genSlotName(clientId)
@@ -1142,9 +1159,9 @@ class PostgresSource : SourceServiceGrpcKt.SourceServiceCoroutineImplBase() {
                                 return@collect
                             }
                             // rewind LSN to committed position by client
-                            forwardSlot(connection, slotName, forLsn)
+                            forwardSlot(parameters, connection, slotName, forLsn)
                             // peak next change(changes) from stream
-                            val peakWalChangesReq = walPeakChangesQuery(slotName, limit=1)
+                            val peakWalChangesReq = walPeakChangesQuery(parameters, slotName, limit=1)
                             val stmt = connection.prepareStatement(peakWalChangesReq)
                             stmt.executeQuery().use { getChangesResult ->
                                 // expect only single result
