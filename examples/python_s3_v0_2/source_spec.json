@@ -1,0 +1,89 @@
+{
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "$id": "http://kry127.ru/python_s3_source.json",
+    "type": "object",
+    "default": {},
+    "title": "Python S3 source sample",
+    "required": [
+        "bucket",
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "prefix",
+        "partitioning_type"
+    ],
+    "properties": {
+        "bucket": {
+            "type": "string",
+            "default": "",
+            "title": "The name of S3 bucket",
+            "examples": [
+                "asdf"
+            ]
+        },
+        "aws_access_key_id": {
+            "type": "string",
+            "default": "",
+            "title": "The key ID for AWS API",
+            "examples": [
+                ""
+            ]
+        },
+        "aws_secret_access_key": {
+            "type": "string",
+            "default": "",
+            "title": "The secret for the key",
+            "examples": [
+                ""
+            ]
+        },
+        "prefix": {
+            "type": "string",
+            "default": "",
+            "title": "The prefix in S3 hierarchy that narrows files to snapshot",
+            "examples": [
+                "home/ubuntu"
+            ]
+        },
+        "filter_regexp": {
+            "type": "string",
+            "default": "",
+            "title": "The general regexp used to filter file names (without prefix)",
+            "examples": [
+                ".*.csv"
+            ]
+        },
+        "partitioning_type": {
+            "type": "string",
+            "default": "",
+            "title": "A partitioning defines how data organized for single table",
+            "examples": [
+                "plain_tables"
+            ]
+        },
+        "plain_tables": {
+            "type": "object",
+            "default": {},
+            "title": "Define plain tables if you would like to specify depth of the path that should be table name",
+            "properties": {
+                "depth": {
+                    "type": "integer",
+                    "default": -1,
+                    "title": "Amount of items in path that define table name. Set -1 to unlimited amount.",
+                    "examples": [
+                        -1
+                    ]
+                }
+            },
+            "examples": [{
+                "depth": 0
+            }]
+        }
+    },
+    "examples": [{
+        "bucket": "asdf",
+        "aws_access_key_id": "",
+        "aws_secret_access_key": "",
+        "prefix": "home/ubuntu",
+        "partitioning_type": "plain_tables"
+    }]
+}
