@@ -12,3 +12,6 @@ gen_golang_v0_2:
 
 cp_kotlin_postgresql_v0_2:
 	cp -r ./proto/api/v0_2 ./examples/kotlin_postgresql_v0_2/protobuf/src/main/proto/api
+
+cp_python_s3_v0_2:
+	cp -r ./proto/ ./examples/python_s3_v0_2/proto/
