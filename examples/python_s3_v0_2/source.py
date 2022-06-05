@@ -216,7 +216,7 @@ def produceChangeItems(params: SourceParams, key: str):
     ))
 
 
-class RouteGuideServicer(src_grpc.SourceServiceServicer):
+class S3Source(src_grpc.SourceServiceServicer):
     def Spec(self, request, context):
         try:
             with open('source_spec.json') as f:
