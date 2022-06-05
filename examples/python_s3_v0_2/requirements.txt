@@ -8,6 +8,7 @@ h2==4.1.0
 hpack==4.0.0
 hyperframe==6.0.1
 jmespath==1.0.0
+jsonlines==3.0.0
 jsonschema==4.6.0
 multidict==6.0.2
 protobuf==3.20.1
