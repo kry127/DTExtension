@@ -60,6 +60,8 @@ def discover_objects(params: SourceParams) -> typing.Dict[str, typing.Union[CsvS
     for page in pages:
         for obj in page['Contents']:
             key = obj['Key'].removeprefix(params.prefix)
+            if not params.filter_re.search(key):
+                continue
             if params.partitioning_type == PartitioningType.PLAIN_TABLES \
                     and params.plain_tables \
                     and params.plain_tables.depth > 0:
@@ -150,6 +152,8 @@ def list_s3_keys(params: SourceParams, for_key: str) -> [str]:
     for page in pages:
         for obj in page['Contents']:
             key = obj['Key'].removeprefix(params.prefix)
+            if not params.filter_re.search(key):
+                continue
             if params.partitioning_type == PartitioningType.PLAIN_TABLES \
                     and params.plain_tables \
                     and params.plain_tables.depth > 0:

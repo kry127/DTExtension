@@ -1,5 +1,6 @@
 # this one complies to source_spec.json defined in root of the python connector
 import enum
+import re
 
 
 class SourceParams:
@@ -19,6 +20,9 @@ class SourceParams:
         self.aws_secret_access_key = aws_secret_access_key
         self.prefix = prefix
         self.filter_regexp = filter_regexp
+        self.filter_re = re.compile(filter_regexp)
+        re.s
+
         if partitioning_type == "plain_tables":
             self.partitioning_type = PartitioningType.PLAIN_TABLES
         else:
