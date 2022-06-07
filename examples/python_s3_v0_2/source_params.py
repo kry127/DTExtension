@@ -6,13 +6,14 @@ import re
 class SourceParams:
     def __init__(
             self,
+            *,
             bucket,
             aws_access_key_id,
             aws_secret_access_key,
             prefix,
             filter_regexp,
             partitioning_type,
-            plain_tables,
+            plain_tables=None,
             file_type
     ):
         self.bucket = bucket
@@ -21,7 +22,6 @@ class SourceParams:
         self.prefix = prefix
         self.filter_regexp = filter_regexp
         self.filter_re = re.compile(filter_regexp)
-        re.s
 
         if partitioning_type == "plain_tables":
             self.partitioning_type = PartitioningType.PLAIN_TABLES
