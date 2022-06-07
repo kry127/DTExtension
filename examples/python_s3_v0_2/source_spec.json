@@ -50,7 +50,7 @@
             "default": "",
             "title": "The general regexp used to filter file names (without prefix)",
             "examples": [
-                ".*\\.csv"
+                ".*\\.csv$"
             ]
         },
         "partitioning_type": {
