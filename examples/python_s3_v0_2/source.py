@@ -52,7 +52,7 @@ class JsonLinesSchema:
 def discover_objects(params: SourceParams) -> typing.Dict[str, typing.Union[CsvSchema, JsonLinesSchema]]:
     session = boto3.Session(aws_access_key_id=params.aws_access_key_id,
                             aws_secret_access_key=params.aws_secret_access_key)
-    s3 = session.resource('s3')
+    s3 = session.client('s3')
 
     paginator = s3.get_paginator('list_objects_v2')
     pages = paginator.paginate(Bucket=params.bucket, Prefix=params.prefix)
@@ -72,7 +72,7 @@ def discover_objects(params: SourceParams) -> typing.Dict[str, typing.Union[CsvS
 
             if params.file_type == FileType.CSV:
                 response = s3.get_object(Bucket=params.bucket, Key=obj['Key'])
-                data = io.TextIOWrapper(response)
+                data = io.TextIOWrapper(response['Body'])
                 line_width = -1
                 for line in data:
                     reader = csv.reader([line], skipinitialspace=True)
@@ -117,7 +117,7 @@ def mkCsvSchema(namespace, name, width):
                 schema=data.Schema(
                     # TODO separate CSV with and without header
                     columns=[data.Column(
-                        name=f"column${i}",
+                        name=f"column{i}",
                         key=False,
                         type=data.COLUMN_TYPE_STRING)
                         for i in range(width)]
@@ -129,13 +129,13 @@ def mkCsvSchema(namespace, name, width):
 # snapshot optimization: https://alexwlchan.net/2019/02/working-with-large-s3-objects/
 def convert_to_proto(params: SourceParams, objects: typing.Dict[str, typing.Union[CsvSchema, JsonLinesSchema]]):
     tables = []
-    for key, schema in objects:
+    for key, schema in objects.items():
         if isinstance(schema, CsvSchema):
             tables.append(mkCsvSchema(params.bucket, key, schema.amount))
         elif isinstance(schema, JsonLinesSchema):
             tables.append(mkJsonLinesSchema(params.bucket, key))
         else:
-            raise ValueError(f"Invalid schema: ${schema}")
+            raise ValueError(f"Invalid schema: {schema}")
     return tables
 
 
@@ -144,7 +144,7 @@ def convert_to_proto(params: SourceParams, objects: typing.Dict[str, typing.Unio
 def list_s3_keys(params: SourceParams, for_key: str) -> [str]:
     session = boto3.Session(aws_access_key_id=params.aws_access_key_id,
                             aws_secret_access_key=params.aws_secret_access_key)
-    s3 = session.resource('s3')
+    s3 = session.client('s3')
 
     paginator = s3.get_paginator('list_objects_v2')
     pages = paginator.paginate(Bucket=params.bucket, Prefix=params.prefix)
@@ -170,27 +170,27 @@ def list_s3_keys(params: SourceParams, for_key: str) -> [str]:
 def produceChangeItems(params: SourceParams, key: str):
     session = boto3.Session(aws_access_key_id=params.aws_access_key_id,
                             aws_secret_access_key=params.aws_secret_access_key)
-    s3 = session.resource('s3')
+    s3 = session.client('s3')
     response = s3.get_object(Bucket=params.bucket, Key=key)
     reader = codecs.getreader("utf-8")(response["Body"])
     if params.file_type == FileType.CSV:
         # https://dev.to/shihanng/how-to-read-csv-file-from-amazon-s3-in-python-4ee9
         for row in csv.DictReader(reader):
-            yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadChangeRsp(
+            yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
                 change_item=data.ChangeItem(
                     data_change_item=data.DataChangeItem(
                         op_type=data.OP_TYPE_INSERT,
                         table=mkCsvSchema(params.bucket, key, len(row)),
-                        format=data.PlainRow(values=[
+                        plain_row=data.PlainRow(values=[
                             data.ColumnValue(string=item)
                         for item in row])
                     )
                 )
-            ))
+            )))
     elif params.file_type == FileType.JSON_LINES:
         with jsonlines.Reader(reader) as reader:
             for json_line in reader:
-                yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadChangeRsp(
+                yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
                     change_item=data.ChangeItem(
                         data_change_item=data.DataChangeItem(
                             op_type=data.OP_TYPE_INSERT,
@@ -200,10 +200,10 @@ def produceChangeItems(params: SourceParams, key: str):
                             ])
                         )
                     )
-                ))
+                )))
 
     # after all, yield check point with current file
-    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadChangeRsp(
+    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
         checkpoint=read_ctl.ReadChangeRsp.CheckPoint(
             cursor=common.Cursor(
                 column_cursor=common.ColumnCursor(
@@ -218,7 +218,7 @@ def produceChangeItems(params: SourceParams, key: str):
                 )
             )
         )
-    ))
+    )))
 
 
 class S3Source(src_grpc.SourceServiceServicer):
@@ -262,9 +262,11 @@ class S3Source(src_grpc.SourceServiceServicer):
 
     def Read(self, request_iterator, context):
         params: typing.Union[SourceParams, None] = None
-        for request in request_iterator:
+        for req in request_iterator:
+            table = req.table
+            request = req.read_ctl_req
             try:
-                req_type = request.WhichOneof('config')
+                req_type = request.WhichOneof('ctl_req')
                 if req_type == "init_req":
                     init_req = request.init_req
                     client_id = init_req.client_id
@@ -279,10 +281,10 @@ class S3Source(src_grpc.SourceServiceServicer):
                     validate(instance=settings, schema=spec)
                     params = SourceParams(**settings)
 
-                    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=common.InitRsp(client_id=client_id))
+                    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(init_rsp=common.InitRsp(client_id=client_id)))
                 elif req_type == "cursor_req":
                     # cursor is iterable by key names in bucket correspoiding to table. Begin with default one.
-                    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.CursorRsp(
+                    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(cursor_rsp=read_ctl.CursorRsp(
                         cursor=common.Cursor(
                             column_cursor=common.ColumnCursor(
                                 column=data.Column(
@@ -295,29 +297,36 @@ class S3Source(src_grpc.SourceServiceServicer):
                                 )
                             )
                         )
-                    ))
+                    )))
                 elif req_type == "read_change_req":
                     read_change_req = request.read_change_req
                     cursor = read_change_req.cursor
                     if cursor.WhichOneof('cursor') != "column_cursor":
                         raise ValueError("cursor error: only 'column_cursor' iterating by files expected")
-                    frm = cursor.column_cursor.data_range['from']
+                    frm = getattr(cursor.column_cursor.data_range, 'from')
                     if frm.WhichOneof('data') != "string":
                         raise ValueError(
                             "cursor error: only 'string' type of column as file name iterating is expected")
                     last_key = frm.string
 
                     # Step 1: poll all files for table, sort them, and bisect with last_filename
-                    s3_keys = sorted(list_s3_keys(params, last_key))
+                    s3_keys = sorted(list_s3_keys(params, table.name))
+                    if not s3_keys:
+                        raise ValueError(f"No S3 keys representing object {table.name}")
                     id = bisect.bisect_right(s3_keys, last_key)
-                    if id >= len(s3_keys) - 1:
+                    if id < len(s3_keys) and s3_keys[id] == last_key:
+                        id += 1
+                    if id >= len(s3_keys):
                         # that's over, send end cursor
-                        yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadChangeRsp(
+                        yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
                             checkpoint=read_ctl.ReadChangeRsp.CheckPoint(
-                                cursor=common.EndCursor()
+                                cursor=common.Cursor(
+                                    end_cursor=common.EndCursor()
+                                )
                             )
-                        ))
-                    next_key = s3_keys[id + 1]
+                        )))
+                        continue
+                    next_key = s3_keys[id]
                     # Step 2: read file and convert to change items
                     yield from produceChangeItems(params, next_key)
                 elif req_type == "begin_snapshot_req":
@@ -325,7 +334,7 @@ class S3Source(src_grpc.SourceServiceServicer):
                 elif req_type == "done_snapshot_req":
                     pass  # do nothing
                 else:
-                    raise ValueError(f"unknown control type: ${req_type}")
+                    raise ValueError(f"unknown control type: {req_type}")
             except Exception as e:
                 print(traceback.format_exc())
                 yield src.ReadRsp(result=mkErr(str(e)))
