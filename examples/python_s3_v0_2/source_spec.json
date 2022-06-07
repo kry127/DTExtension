@@ -42,7 +42,7 @@
             "default": "",
             "title": "The prefix in S3 hierarchy that narrows files to snapshot",
             "examples": [
-                "home/ubuntu"
+                "home/ubuntu/"
             ]
         },
         "filter_regexp": {

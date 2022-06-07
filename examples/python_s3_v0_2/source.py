@@ -169,6 +169,8 @@ def list_s3_keys(params: SourceParams, for_key: str) -> [str]:
 
 # this generator generates change items from requested key in bucket
 def produceChangeItems(params: SourceParams, key: str):
+    table_name = key.removeprefix(params.prefix)
+
     session = boto3.Session(aws_access_key_id=params.aws_access_key_id,
                             aws_secret_access_key=params.aws_secret_access_key)
     s3 = session.client('s3')
@@ -177,14 +179,13 @@ def produceChangeItems(params: SourceParams, key: str):
     if params.file_type == FileType.CSV:
         # https://dev.to/shihanng/how-to-read-csv-file-from-amazon-s3-in-python-4ee9
         for row in csv.DictReader(reader):
+            values = [data.ColumnValue(string=value) for _, value in row.items()]
             yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
                 change_item=data.ChangeItem(
                     data_change_item=data.DataChangeItem(
                         op_type=data.OP_TYPE_INSERT,
-                        table=mkCsvSchema(params.bucket, key, len(row)),
-                        plain_row=data.PlainRow(values=[
-                            data.ColumnValue(string=item)
-                            for item in row])
+                        table=mkCsvSchema(params.bucket, table_name, len(values)),
+                        plain_row=data.PlainRow(values=values)
                     )
                 )
             )))
@@ -192,17 +193,17 @@ def produceChangeItems(params: SourceParams, key: str):
         with jsonlines.Reader(reader) as reader:
             for json_line in reader:
                 yield src.ReadRsp(result=mkOk(),
-                                  read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
-                                      change_item=data.ChangeItem(
-                                          data_change_item=data.DataChangeItem(
-                                              op_type=data.OP_TYPE_INSERT,
-                                              table=mkJsonLinesSchema(params.bucket, key),
-                                              format=data.PlainRow(values=[
-                                                  data.ColumnValue(json=json_line)
-                                              ])
-                                          )
-                                      )
-                                  )))
+                  read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
+                      change_item=data.ChangeItem(
+                          data_change_item=data.DataChangeItem(
+                              op_type=data.OP_TYPE_INSERT,
+                              table=mkJsonLinesSchema(params.bucket, table_name),
+                              format=data.PlainRow(values=[
+                                  data.ColumnValue(json=json_line)
+                              ])
+                          )
+                      )
+                  )))
 
     # after all, yield check point with current file
     data_range = common.DataRange()
@@ -291,7 +292,6 @@ class S3Source(src_grpc.SourceServiceServicer):
                     data_range = common.DataRange()
                     col_value = getattr(data_range, 'from')
                     col_value.string = ''
-                    # setattr(data_range, 'from', data.ColumnValue(string=''))
                     yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(cursor_rsp=read_ctl.CursorRsp(
                         cursor=common.Cursor(
                             column_cursor=common.ColumnCursor(
