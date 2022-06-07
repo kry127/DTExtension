@@ -53,6 +53,22 @@
                 ".*\\.csv$"
             ]
         },
+        "csv_delimiter": {
+            "type": "string",
+            "default": ",",
+            "title": "A csv separator",
+            "examples": [
+                ",", ";", "\t"
+            ]
+        },
+        "csv_quotechar": {
+            "type": "string",
+            "default": "\"",
+            "title": "A csv separator",
+            "examples": [
+                "\""
+            ]
+        },
         "partitioning_type": {
             "type": "string",
             "default": "",

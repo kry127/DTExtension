@@ -75,7 +75,11 @@ def discover_objects(params: SourceParams) -> typing.Dict[str, typing.Union[CsvS
                 data = io.TextIOWrapper(response['Body'])
                 line_width = -1
                 for line in data:
-                    reader = csv.reader([line], skipinitialspace=True)
+                    reader = csv.reader([line],
+                                        delimiter=params.csv_delimeter,
+                                        quotechar=params.csv_quotechar,
+                                        skipinitialspace=True
+                                        )
                     for r in reader:
                         line_width = len(r)
                         break
@@ -178,7 +182,11 @@ def produceChangeItems(params: SourceParams, key: str):
     reader = codecs.getreader("utf-8")(response["Body"])
     if params.file_type == FileType.CSV:
         # https://dev.to/shihanng/how-to-read-csv-file-from-amazon-s3-in-python-4ee9
-        for row in csv.DictReader(reader):
+        for row in csv.DictReader(reader,
+                                  delimiter=params.csv_delimeter,
+                                  quotechar=params.csv_quotechar,
+                                  skipinitialspace=True,
+                                  ):
             values = [data.ColumnValue(string=value) for _, value in row.items()]
             yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
                 change_item=data.ChangeItem(

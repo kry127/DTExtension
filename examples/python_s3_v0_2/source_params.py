@@ -14,6 +14,8 @@ class SourceParams:
             filter_regexp,
             partitioning_type,
             plain_tables=None,
+            csv_delimeter=",",
+            csv_quotechar="\"",
             file_type
     ):
         self.bucket = bucket
@@ -28,6 +30,8 @@ class SourceParams:
         else:
             raise ValueError(f"invalid value of field 'partitioning_type': ${file_type}")
         self.plain_tables = plain_tables
+        self.csv_delimeter = csv_delimeter
+        self.csv_quotechar = csv_quotechar
         if file_type == "csv":
             self.file_type = FileType.CSV
         elif file_type == "json_lines":
