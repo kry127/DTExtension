@@ -101,13 +101,13 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
             ColumnType.COLUMN_TYPE_UINT64 -> return columnValue.uint64.toString()
             ColumnType.COLUMN_TYPE_FLOAT -> return columnValue.float.toString()
             ColumnType.COLUMN_TYPE_DOUBLE -> return columnValue.double.toString()
-            ColumnType.COLUMN_TYPE_JSON -> return "'${columnValue.json}'"
+            ColumnType.COLUMN_TYPE_JSON -> return "'${columnValue.json.replace("'", "\\\"")}'"
             ColumnType.COLUMN_TYPE_DECIMAL -> return columnValue.decimal.asString
             ColumnType.COLUMN_TYPE_BIG_DECIMAL -> return columnValue.bigDecimal
             ColumnType.COLUMN_TYPE_BIG_INTEGER -> return columnValue.bigInteger
             ColumnType.COLUMN_TYPE_UNIX_TIME -> return "to_timestamp(${columnValue.unixTime}) :: timestamp AT TIME ZONE 'UTC'"
-            ColumnType.COLUMN_TYPE_STRING -> return "'${columnValue.string}'"
-            ColumnType.COLUMN_TYPE_BINARY -> return columnValue.binary.toStringUtf8()
+            ColumnType.COLUMN_TYPE_STRING -> return "'${columnValue.string.replace("'", "\\\"")}'"
+            ColumnType.COLUMN_TYPE_BINARY -> return columnValue.binary.toStringUtf8().replace("'", "\\\"")
             ColumnType.COLUMN_TYPE_UNSPECIFIED,
             ColumnType.UNRECOGNIZED,
             null -> throw DtExtensionException("Unknown type ${column.type}")
