@@ -200,10 +200,16 @@ class PostgresSink : SinkServiceGrpcKt.SinkServiceCoroutineImplBase() {
         val values = table.schema.columnsList.zip(plainRow.valuesList).joinToString {
                 (column, value) -> generateSqlValue(column, value)
         }
+        val keys = table.schema.columnsList.filter { it.key }.joinToString { it.name }
+        val onConflict = if (!keys.isEmpty()) {
+            """
+                ON CONFLICT ($keys) DO UPDATE
+                SET ($fields) =  ($values)
+            """.trimIndent()
+        } else ""
         val query = """
             INSERT INTO "$namespace"."$name" ($fields) VALUES ($values)
-            ON CONFLICT (id) DO UPDATE
-                SET ($fields) =  ($values)
+            $onConflict
             ;
             """.trimIndent()
         batch.addBatch(query)
