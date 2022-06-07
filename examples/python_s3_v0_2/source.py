@@ -335,12 +335,12 @@ class S3Source(src_grpc.SourceServiceServicer):
                     yield from produceChangeItems(params, next_key)
                 elif req_type == "begin_snapshot_req":
                     yield src.ReadRsp(result=mkOk(),
-                                      read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.BeginSnapshotRsp(
-                                          snapshot_state=""
+                                      read_ctl_rsp=read_ctl.ReadCtlRsp(begin_snapshot_rsp=read_ctl.BeginSnapshotRsp(
+                                          snapshot_state=b''
                                       )))
                 elif req_type == "done_snapshot_req":
                     yield src.ReadRsp(result=mkOk(),
-                                      read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.DoneSnapshotRsp(
+                                      read_ctl_rsp=read_ctl.ReadCtlRsp(done_snapshot_rsp=read_ctl.DoneSnapshotRsp(
                                       )))
                 else:
                     raise ValueError(f"unknown control type: {req_type}")
