@@ -1,4 +1,5 @@
 # proto imports
+import traceback
 
 import api.v0_2.source.source_service_pb2_grpc as src_grpc
 import api.v0_2.source.source_service_pb2 as src
@@ -227,6 +228,7 @@ class S3Source(src_grpc.SourceServiceServicer):
                 spec = f.read()
             return common.SpecRsp(result=mkOk(), json_spec=spec)
         except Exception as e:
+            print(traceback.format_exc())
             return common.SpecRsp(result=mkErr(str(e)))
 
     def Check(self, request, context):
@@ -238,6 +240,7 @@ class S3Source(src_grpc.SourceServiceServicer):
             validate(instance=settings, schema=spec)
             return common.CheckRsp(result=mkOk())
         except Exception as e:
+            print(traceback.format_exc())
             return common.SpecRsp(result=mkErr(str(e)))
 
     def Discover(self, request, context):
@@ -254,6 +257,7 @@ class S3Source(src_grpc.SourceServiceServicer):
             return src.DiscoverRsp(result=mkOk(), tables=tables)
 
         except Exception as e:
+            print(traceback.format_exc())
             return src.DiscoverRsp(result=mkErr(str(e)))
 
     def Read(self, request_iterator, context):
@@ -323,6 +327,7 @@ class S3Source(src_grpc.SourceServiceServicer):
                 else:
                     raise ValueError(f"unknown control type: ${req_type}")
             except Exception as e:
+                print(traceback.format_exc())
                 yield src.ReadRsp(result=mkErr(str(e)))
 
     def Stream(self, request_iterator, context):
