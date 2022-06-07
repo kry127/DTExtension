@@ -205,6 +205,9 @@ def produceChangeItems(params: SourceParams, key: str):
                                   )))
 
     # after all, yield check point with current file
+    data_range = common.DataRange()
+    col_value = getattr(data_range, 'from')
+    col_value.string = key
     yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
         checkpoint=read_ctl.ReadChangeRsp.CheckPoint(
             cursor=common.Cursor(
@@ -214,9 +217,7 @@ def produceChangeItems(params: SourceParams, key: str):
                         key=True,
                         type=data.COLUMN_TYPE_STRING
                     ),
-                    data_range=common.DataRange(
-                        **{"from": data.ColumnValue(string=key)}
-                    )
+                    data_range=data_range
                 )
             )
         )
@@ -287,6 +288,10 @@ class S3Source(src_grpc.SourceServiceServicer):
                                       read_ctl_rsp=read_ctl.ReadCtlRsp(init_rsp=common.InitRsp(client_id=client_id)))
                 elif req_type == "cursor_req":
                     # cursor is iterable by key names in bucket correspoiding to table. Begin with default one.
+                    data_range = common.DataRange()
+                    col_value = getattr(data_range, 'from')
+                    col_value.string = ''
+                    # setattr(data_range, 'from', data.ColumnValue(string=''))
                     yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(cursor_rsp=read_ctl.CursorRsp(
                         cursor=common.Cursor(
                             column_cursor=common.ColumnCursor(
@@ -295,9 +300,7 @@ class S3Source(src_grpc.SourceServiceServicer):
                                     key=True,
                                     type=data.COLUMN_TYPE_STRING
                                 ),
-                                data_range=common.DataRange(
-                                    **{"from": data.ColumnValue(string="")}
-                                )
+                                data_range=data_range
                             )
                         )
                     )))
