@@ -97,32 +97,33 @@ def discover_objects(params: SourceParams) -> typing.Dict[str, typing.Union[CsvS
 
 def mkJsonLinesSchema(namespace, name):
     return data.Table(
-                namespace=data.Namespace(namespace=namespace),
-                name=name,
-                schema=data.Schema(
-                    # TODO separate CSV with and without header
-                    columns=[data.Column(
-                        name=f"value",
-                        key=False,
-                        type=data.COLUMN_TYPE_JSON
-                    )]
-                )
-            )
+        namespace=data.Namespace(namespace=namespace),
+        name=name,
+        schema=data.Schema(
+            # TODO separate CSV with and without header
+            columns=[data.Column(
+                name=f"value",
+                key=False,
+                type=data.COLUMN_TYPE_JSON
+            )]
+        )
+    )
 
 
 def mkCsvSchema(namespace, name, width):
     return data.Table(
-                namespace=data.Namespace(namespace=namespace),
-                name=name,
-                schema=data.Schema(
-                    # TODO separate CSV with and without header
-                    columns=[data.Column(
-                        name=f"column{i}",
-                        key=False,
-                        type=data.COLUMN_TYPE_STRING)
-                        for i in range(width)]
-                )
-            )
+        namespace=data.Namespace(namespace=namespace),
+        name=name,
+        schema=data.Schema(
+            # TODO separate CSV with and without header
+            columns=[data.Column(
+                name=f"column{i}",
+                key=False,
+                type=data.COLUMN_TYPE_STRING)
+                for i in range(width)]
+        )
+    )
+
 
 # this function converts discovered objects (from 'discover_objects' function) to table proto description
 # TODO we can add byte counter to schema and
@@ -183,24 +184,25 @@ def produceChangeItems(params: SourceParams, key: str):
                         table=mkCsvSchema(params.bucket, key, len(row)),
                         plain_row=data.PlainRow(values=[
                             data.ColumnValue(string=item)
-                        for item in row])
+                            for item in row])
                     )
                 )
             )))
     elif params.file_type == FileType.JSON_LINES:
         with jsonlines.Reader(reader) as reader:
             for json_line in reader:
-                yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
-                    change_item=data.ChangeItem(
-                        data_change_item=data.DataChangeItem(
-                            op_type=data.OP_TYPE_INSERT,
-                            table=mkJsonLinesSchema(params.bucket, key),
-                            format=data.PlainRow(values=[
-                                data.ColumnValue(json=json_line)
-                            ])
-                        )
-                    )
-                )))
+                yield src.ReadRsp(result=mkOk(),
+                                  read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
+                                      change_item=data.ChangeItem(
+                                          data_change_item=data.DataChangeItem(
+                                              op_type=data.OP_TYPE_INSERT,
+                                              table=mkJsonLinesSchema(params.bucket, key),
+                                              format=data.PlainRow(values=[
+                                                  data.ColumnValue(json=json_line)
+                                              ])
+                                          )
+                                      )
+                                  )))
 
     # after all, yield check point with current file
     yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
@@ -281,7 +283,8 @@ class S3Source(src_grpc.SourceServiceServicer):
                     validate(instance=settings, schema=spec)
                     params = SourceParams(**settings)
 
-                    yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(init_rsp=common.InitRsp(client_id=client_id)))
+                    yield src.ReadRsp(result=mkOk(),
+                                      read_ctl_rsp=read_ctl.ReadCtlRsp(init_rsp=common.InitRsp(client_id=client_id)))
                 elif req_type == "cursor_req":
                     # cursor is iterable by key names in bucket correspoiding to table. Begin with default one.
                     yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(cursor_rsp=read_ctl.CursorRsp(
@@ -318,21 +321,27 @@ class S3Source(src_grpc.SourceServiceServicer):
                         id += 1
                     if id >= len(s3_keys):
                         # that's over, send end cursor
-                        yield src.ReadRsp(result=mkOk(), read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
-                            checkpoint=read_ctl.ReadChangeRsp.CheckPoint(
-                                cursor=common.Cursor(
-                                    end_cursor=common.EndCursor()
-                                )
-                            )
-                        )))
+                        yield src.ReadRsp(result=mkOk(),
+                                          read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.ReadChangeRsp(
+                                              checkpoint=read_ctl.ReadChangeRsp.CheckPoint(
+                                                  cursor=common.Cursor(
+                                                      end_cursor=common.EndCursor()
+                                                  )
+                                              )
+                                          )))
                         continue
                     next_key = s3_keys[id]
                     # Step 2: read file and convert to change items
                     yield from produceChangeItems(params, next_key)
                 elif req_type == "begin_snapshot_req":
-                    pass  # do nothing
+                    yield src.ReadRsp(result=mkOk(),
+                                      read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.BeginSnapshotRsp(
+                                          snapshot_state=""
+                                      )))
                 elif req_type == "done_snapshot_req":
-                    pass  # do nothing
+                    yield src.ReadRsp(result=mkOk(),
+                                      read_ctl_rsp=read_ctl.ReadCtlRsp(read_change_rsp=read_ctl.DoneSnapshotRsp(
+                                      )))
                 else:
                     raise ValueError(f"unknown control type: {req_type}")
             except Exception as e:
