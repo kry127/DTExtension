@@ -28,6 +28,7 @@ dependencies {
     // connector-specific
     implementation("org.postgresql:postgresql:42.3.4") // for PostgreSQL JDBC + Replication API
     implementation("org.jetbrains.kotlinx:kotlinx-cli:0.3.4") // for CLI utility
+    implementation("com.oracle.database.jdbc:ojdbc8:21.5.0.0") // for CLI utility
 
     testImplementation("junit", "junit", "4.12")
 }
